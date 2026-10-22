@@ -270,7 +270,8 @@ Because the API and Celery worker run as separate processes, `/metrics` describe
 - [x] Record analysis-job lifecycle events for basic processing provenance
 - [ ] Add structured reports and expanded analysis provenance
 - [x] Add initial API request metrics, dependency health checks, and structured worker logs
-- [ ] Expand integration tests, worker-level metrics aggregation, and deployment automation
+- [x] Add end-to-end API workflow tests for upload, analysis, events, and reports
+- [ ] Expand worker-level metrics aggregation and deployment automation
 
 ## License
 
@@ -301,3 +302,7 @@ docker compose logs -f api worker
 ```
 
 The API is bound to `127.0.0.1:8000` by default. Check `http://127.0.0.1:8000/health` and `http://127.0.0.1:8000/docs`. PostgreSQL and Redis ports remain bound to localhost for development. This Compose configuration is a reproducible single-host deployment baseline, not a hardened public production deployment; add TLS, authentication/authorization, secret management, backups, and network restrictions before exposing it to untrusted users.
+
+## End-to-end workflow tests
+
+`backend/tests/test_investigation_workflow.py` exercises investigation creation, media upload, analysis-job execution, event retrieval, and report generation against an isolated SQLite database. The tests run the real analysis task body synchronously and replace only the Celery broker handoff, so they do not require local PostgreSQL or Redis services. Run them with `python -m pytest -q` from `backend`; production-like broker and database behavior should still be smoke-tested with Docker Compose separately.
