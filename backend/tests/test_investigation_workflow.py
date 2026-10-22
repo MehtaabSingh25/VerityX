@@ -37,6 +37,7 @@ def workflow_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
 
     import app.api.analysis_jobs as analysis_jobs_api
     import app.api.media_ingestion as media_api
+    import app.api.operations as operations_api
     import app.api.reports as reports_api
     import app.api.similarity as similarity_api
     import app.tasks.analysis as analysis_tasks
@@ -45,6 +46,7 @@ def workflow_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
     for module in (
         analysis_jobs_api,
         media_api,
+        operations_api,
         reports_api,
         similarity_api,
         analysis_tasks,
@@ -126,6 +128,15 @@ def test_upload_analysis_events_and_report_workflow(workflow_client: TestClient)
     assert report["summary"]["analysis_jobs_by_status"] == {"completed": 1}
     assert report["analysis_jobs"][0]["result"]["matches"] is True
     assert report["media_assets"][0]["sha256"] == media["sha256"]
+
+    operations_response = client.get("/api/v1/operations/summary")
+    assert operations_response.status_code == 200
+    operations = operations_response.json()
+    assert operations["total_jobs"] == 1
+    assert operations["jobs_by_status"] == {"completed": 1}
+    assert operations["jobs_by_analysis_type"] == {"integrity_check": 1}
+    assert operations["lifecycle_events_by_type"]["completed"] == 1
+    assert "generated_at" in operations
 
 
 def test_report_returns_not_found_for_unknown_investigation(

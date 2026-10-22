@@ -256,6 +256,8 @@ Use `GET /health` to check PostgreSQL and Redis connectivity. It returns `200` w
 
 Because the API and Celery worker run as separate processes, `/metrics` describes the API process only. Worker execution outcomes are currently observable through structured worker logs and persisted job/event records; worker-level Prometheus aggregation is a future improvement.
 
+`GET /api/v1/operations/summary` provides database-backed counts of analysis jobs by status and analysis type, plus lifecycle events by event type. It intentionally excludes media content and free-form error messages. Treat this endpoint as operational information and restrict access to trusted operators when deploying beyond a local development environment.
+
 ## Roadmap
 
 - [ ] Establish the repository and local development environment
