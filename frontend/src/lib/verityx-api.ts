@@ -92,6 +92,22 @@ export function createInvestigation(payload: { title: string; description: strin
   });
 }
 
+export function listInvestigationMedia(investigationId: string) {
+  return requestJson<MediaResponse[]>(
+    `/investigations/${encodeURIComponent(investigationId)}/media`,
+    {},
+    investigationId,
+  );
+}
+
+export function deleteInvestigationMedia(investigationId: string, mediaAssetId: string) {
+  return requestJson<void>(
+    `/investigations/${encodeURIComponent(investigationId)}/media/${encodeURIComponent(mediaAssetId)}`,
+    { method: "DELETE" },
+    investigationId,
+  );
+}
+
 export function uploadMedia(investigationId: string, file: File) {
   const body = new FormData();
   body.append("file", file);

@@ -10,8 +10,10 @@ import {
   getAnalysisJob,
   searchPublicWebImage,
   uploadMedia,
+  listInvestigationMedia,
+  deleteInvestigationMedia,
 } from "@/lib/verityx-api";
-import type { PublicWebImageSearchResponse } from "@/lib/verityx-api";
+import type { MediaResponse, PublicWebImageSearchResponse } from "@/lib/verityx-api";
 
 type EvidenceState =
   | "Ready"
@@ -55,6 +57,9 @@ export default function InvestigationWorkspacePage() {
   const investigationId = decodeURIComponent(params.id);
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<EvidenceItem[]>([]);
+  const [storedMedia, setStoredMedia] = useState<MediaResponse[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -64,11 +69,71 @@ export default function InvestigationWorkspacePage() {
       investigationId,
     );
 
+  async function refreshInventory() {
+    if (!isRealInvestigation) return;
+    setInventoryLoading(true);
+    try {
+      const media = await listInvestigationMedia(investigationId);
+      setStoredMedia(media);
+    } catch (inventoryError) {
+      setError(
+        inventoryError instanceof Error
+          ? inventoryError.message
+          : "Could not load stored evidence inventory.",
+      );
+    } finally {
+      setInventoryLoading(false);
+    }
+  }
+
+  async function deleteStoredEvidence(asset: MediaResponse) {
+    const label = asset.original_filename || asset.id;
+    if (
+      !window.confirm(
+        `Permanently delete "${label}" and its stored analysis data? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingAssetId(asset.id);
+    setError("");
+    setNotice("");
+    try {
+      await deleteInvestigationMedia(investigationId, asset.id);
+      setStoredMedia((current) => current.filter((item) => item.id !== asset.id));
+      setItems((current) => current.filter((item) => item.assetId !== asset.id));
+      setNotice(`Deleted evidence: ${label}`);
+    } catch (deleteError) {
+      setError(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Could not delete evidence.",
+      );
+    } finally {
+      setDeletingAssetId(null);
+    }
+  }
+
   useEffect(() => {
     if (!isRealInvestigation) return;
     let active = true;
-    checkBackendHealth().then((healthy) => {
-      if (active) setApiOnline(healthy);
+    checkBackendHealth().then(async (healthy) => {
+      if (!active) return;
+      setApiOnline(healthy);
+      if (healthy) {
+        try {
+          const media = await listInvestigationMedia(investigationId);
+          if (active) setStoredMedia(media);
+        } catch (inventoryError) {
+          if (active) {
+            setError(
+              inventoryError instanceof Error
+                ? inventoryError.message
+                : "Could not load stored evidence inventory.",
+            );
+          }
+        }
+      }
     });
     return () => {
       active = false;
@@ -170,6 +235,7 @@ export default function InvestigationWorkspacePage() {
         setError(`${item.file.name}: ${message}`);
       }
     }
+    await refreshInventory();
     setNotice(
       "Upload attempts finished. Review each file's state before starting analysis.",
     );
@@ -354,7 +420,6 @@ export default function InvestigationWorkspacePage() {
     }
   }
 
-  const totalBytes = items.reduce((total, item) => total + item.file.size, 0);
 
   return (
     <main className="workspace-page">
@@ -429,10 +494,8 @@ export default function InvestigationWorkspacePage() {
             <div>
               <strong>Connected workspace</strong>
               <p>
-                Uploads and integrity-check submissions are sent to the
-                configured FastAPI backend. This page currently lists files
-                selected in this browser session; it does not yet fetch the full
-                stored evidence inventory after refresh.
+                Evidence is loaded from persistent backend storage. Deleting an
+                item removes its record and associated analysis data.
               </p>
             </div>
           </div>
@@ -456,14 +519,14 @@ export default function InvestigationWorkspacePage() {
           aria-label="Evidence queue summary"
         >
           <article>
-            <span>FILES IN LOCAL QUEUE</span>
-            <strong>{String(items.length).padStart(2, "0")}</strong>
-            <small>Selected in this browser session</small>
+            <span>STORED EVIDENCE</span>
+            <strong>{String(storedMedia.length).padStart(2, "0")}</strong>
+            <small>Persisted in this investigation</small>
           </article>
           <article>
-            <span>TOTAL SELECTED SIZE</span>
-            <strong>{formatBytes(totalBytes)}</strong>
-            <small>Maximum 50 MiB per file</small>
+            <span>LOCAL SELECTION</span>
+            <strong>{String(items.filter((item) => !item.assetId).length).padStart(2, "0")}</strong>
+            <small>Not uploaded yet</small>
           </article>
           <article>
             <span>ANALYSIS STATUS</span>
@@ -472,6 +535,90 @@ export default function InvestigationWorkspacePage() {
             </strong>
             <small>Submitted or running jobs</small>
           </article>
+        </section>
+
+        <section className="workspace-panel evidence-list-panel">
+          <div className="workspace-panel-header">
+            <div>
+              <h2>
+                Stored evidence{" "}
+                <span className="workspace-count">{storedMedia.length}</span>
+              </h2>
+              <p>Persisted records loaded from the backend</p>
+            </div>
+            <div className="workspace-header-actions">
+              <button
+                className="workspace-text-button"
+                disabled={!isRealInvestigation || inventoryLoading}
+                onClick={refreshInventory}
+              >
+                {inventoryLoading ? "Refreshing…" : "Refresh inventory"}
+              </button>
+            </div>
+          </div>
+          {inventoryLoading && storedMedia.length === 0 ? (
+            <div className="workspace-empty">
+              <strong>Loading evidence inventory…</strong>
+            </div>
+          ) : storedMedia.length === 0 ? (
+            <div className="workspace-empty">
+              <div className="workspace-empty-icon">▤</div>
+              <strong>No stored evidence</strong>
+              <p>Uploaded files will appear here and remain available after a page refresh.</p>
+            </div>
+          ) : (
+            <div className="evidence-table-wrap">
+              <table className="evidence-table">
+                <thead>
+                  <tr>
+                    <th>FILE</th>
+                    <th>TYPE</th>
+                    <th>SIZE</th>
+                    <th>SHA-256</th>
+                    <th>UPLOADED</th>
+                    <th>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {storedMedia.map((asset) => (
+                    <tr key={asset.id}>
+                      <td>
+                        <div className="workspace-file-cell">
+                          <span
+                            className={`workspace-file-icon ${asset.mime_type.startsWith("video/") ? "video" : "image"}`}
+                          >
+                            {asset.mime_type.startsWith("video/") ? "▶" : "▧"}
+                          </span>
+                          <div>
+                            <strong>{asset.original_filename}</strong>
+                            <small>{asset.id}</small>
+                          </div>
+                        </div>
+                      </td>
+                      <td>{asset.mime_type.startsWith("video/") ? "VIDEO" : "IMAGE"}</td>
+                      <td>{formatBytes(asset.size_bytes)}</td>
+                      <td><code title={asset.sha256}>{asset.sha256.slice(0, 12)}…</code></td>
+                      <td>{asset.created_at ? new Date(asset.created_at).toLocaleString() : "—"}</td>
+                      <td>
+                        <div className="workspace-row-actions">
+                          <button
+                            disabled={deletingAssetId === asset.id}
+                            onClick={() => deleteStoredEvidence(asset)}
+                          >
+                            {deletingAssetId === asset.id ? "Deleting…" : "Delete evidence"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="workspace-panel-footer">
+            <span><i /> {apiOnline ? "Backend reachable" : "Backend not confirmed"}</span>
+            <span>Permanent deletion requires confirmation</span>
+          </div>
         </section>
 
         <section className="workspace-panel">
