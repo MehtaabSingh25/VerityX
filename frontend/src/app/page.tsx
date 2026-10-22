@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { checkBackendHealth, createInvestigation as createInvestigationApi } from "@/lib/verityx-api";
+import { checkBackendHealth, createInvestigation as createInvestigationApi, getOperationsSummary, type OperationsSummary } from "@/lib/verityx-api";
 
 type Status = "Complete" | "Processing" | "Queued";
 type View = "Overview" | "Investigations" | "Evidence" | "Analysis jobs" | "Reports" | "Settings";
@@ -70,6 +70,9 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState<"checking" | "connected" | "offline">("checking");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [operations, setOperations] = useState<OperationsSummary | null>(null);
+  const [operationsLoading, setOperationsLoading] = useState(false);
+  const [operationsError, setOperationsError] = useState("");
 
   const filteredInvestigations = useMemo(() => investigations.filter((item) => {
     const matchesSearch = `${item.title} ${item.id} ${item.description}`.toLowerCase().includes(search.toLowerCase());
@@ -85,6 +88,22 @@ export default function Home() {
     });
     return () => { active = false; };
   }, []);
+
+  const refreshOperations = useCallback(async () => {
+    setOperationsLoading(true);
+    setOperationsError("");
+    try {
+      setOperations(await getOperationsSummary());
+    } catch (error) {
+      setOperationsError(error instanceof Error ? error.message : "Could not load operational summary.");
+    } finally {
+      setOperationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (view === "Settings") void refreshOperations();
+  }, [view, refreshOperations]);
 
   async function createInvestigation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -194,7 +213,27 @@ export default function Home() {
             <section className="bottom-grid"><article className="panel queue-panel"><div className="panel-header"><div><h2>Analysis queue</h2><p>Background tasks by current state</p></div><button className="text-button" onClick={() => setView("Analysis jobs")}>All jobs <Icon name="arrow" size={15} /></button></div><div className="queue-content"><div className="queue-summary"><div className="queue-number">03</div><div><strong>Jobs in progress</strong><span>Workers are processing queued media</span></div></div><div className="queue-track"><span className="queue-complete" /><span className="queue-processing" /><span className="queue-pending" /></div><div className="queue-legend"><span><i className="legend-green" /> Completed <strong>142</strong></span><span><i className="legend-amber" /> Processing <strong>3</strong></span><span><i className="legend-gray" /> Queued <strong>8</strong></span></div></div></article><article className="panel integrity-panel"><div className="panel-header"><div><h2>Evidence integrity</h2><p>Recorded file-hash verification status</p></div><span className="mini-badge">DEMO</span></div><div className="integrity-content"><div className="integrity-ring"><div><strong>98.6<span>%</span></strong><small>match rate</small></div></div><div className="integrity-details"><div><span className="integrity-key"><i className="legend-green" /> Hash matches</span><strong>138</strong></div><div><span className="integrity-key"><i className="legend-amber" /> Needs review</span><strong>2</strong></div><p>Hash matches indicate byte-level consistency with a recorded digest. They do not establish source authenticity.</p></div></div></article></section>
           </>}
 
-          {view !== "Overview" && <section className="panel section-placeholder"><div className="placeholder-icon"><Icon name={view === "Investigations" ? "folder" : view === "Evidence" ? "layers" : view === "Analysis jobs" ? "activity" : view === "Reports" ? "file" : "settings"} size={25} /></div><h2>{view} workspace</h2><p>{view === "Settings" ? "The dashboard is currently in demo mode. Configure the backend API connection in a future integration step; never place a private service API key in a NEXT_PUBLIC environment variable." : `This ${view.toLowerCase()} view is scaffolded for the next integration milestone. The current dashboard uses sample data and does not yet read or write records through FastAPI.`}</p><div className="placeholder-actions"><button className="button button-primary" onClick={() => { setView("Overview"); setNotice(""); }}>Back to overview</button>{view === "Investigations" && <button className="button button-secondary" onClick={() => setShowCreate(true)}><Icon name="plus" size={16} /> New demo investigation</button>}</div></section>}
+          {view === "Settings" ? <section className="operations-layout" aria-label="System status and security settings">
+            <article className="panel operations-panel">
+              <div className="panel-header"><div><h2>Backend connection</h2><p>Live health check through the same-origin server proxy</p></div><span className={`operations-health ${apiStatus}`}><i />{apiStatus === "checking" ? "Checking" : apiStatus === "connected" ? "Reachable" : "Unreachable"}</span></div>
+              <div className="operations-body">
+                <div className="operations-info-row"><span>API health endpoint</span><strong>/health</strong></div>
+                <div className="operations-info-row"><span>Connection state</span><strong>{apiStatus === "connected" ? "Backend responded successfully" : apiStatus === "offline" ? "Check VERITYX_BACKEND_URL and backend process" : "Checking backend…"}</strong></div>
+                <div className="operations-security-note"><Icon name="shield" size={18} /><div><strong>Server-side credentials only</strong><p>Keep VERITYX_API_KEY in frontend/.env.local or the deployment secret store. Never use a NEXT_PUBLIC_ prefix for private credentials.</p></div></div>
+                <div className="operations-security-note"><Icon name="key" size={18} /><div><strong>Investigation tokens</strong><p>Scoped tokens are kept in sessionStorage for the current browser session and forwarded through the same-origin proxy. Sign out or close the session when finished on a shared device.</p></div></div>
+              </div>
+            </article>
+            <article className="panel operations-panel">
+              <div className="panel-header"><div><h2>Analysis operations</h2><p>Counts from persisted job and lifecycle records</p></div><button className="text-button" onClick={() => void refreshOperations()} disabled={operationsLoading}><Icon name="clock" size={14} /> {operationsLoading ? "Refreshing…" : "Refresh"}</button></div>
+              {operationsError ? <div className="operations-message error" role="alert"><strong>Operational summary unavailable</strong><p>{operationsError}</p><button className="button button-secondary" onClick={() => void refreshOperations()}>Try again</button></div> : operationsLoading && !operations ? <div className="operations-message">Loading live operational summary…</div> : operations ? <div className="operations-body">
+                <div className="operations-total"><span>Total analysis jobs</span><strong>{operations.total_jobs ?? 0}</strong><small>{operations.generated_at ? `Updated ${new Date(operations.generated_at).toLocaleString()}` : "Live API response"}</small></div>
+                <h3>Jobs by status</h3><div className="operations-count-grid">{Object.entries(operations.jobs_by_status ?? {}).length ? Object.entries(operations.jobs_by_status ?? {}).map(([key, value]) => <div className="operations-count" key={key}><span>{key.replaceAll("_", " ")}</span><strong>{value}</strong></div>) : <p className="operations-muted">No job status counts returned.</p>}</div>
+                <h3>Jobs by analysis type</h3><div className="operations-count-grid">{Object.entries(operations.jobs_by_analysis_type ?? {}).length ? Object.entries(operations.jobs_by_analysis_type ?? {}).map(([key, value]) => <div className="operations-count" key={key}><span>{key.replaceAll("_", " ")}</span><strong>{value}</strong></div>) : <p className="operations-muted">No analysis type counts returned.</p>}</div>
+                <h3>Lifecycle events</h3><div className="operations-count-grid">{Object.entries(operations.lifecycle_events_by_type ?? {}).length ? Object.entries(operations.lifecycle_events_by_type ?? {}).map(([key, value]) => <div className="operations-count" key={key}><span>{key.replaceAll("_", " ")}</span><strong>{value}</strong></div>) : <p className="operations-muted">No lifecycle event counts returned.</p>}</div>
+              </div> : <div className="operations-message">No operational summary has been loaded yet.</div>}
+            </article>
+            <div className="operations-footnote"><Icon name="info" size={15} /><span>This view reflects API response data. It does not directly inspect Redis queue depth or guarantee that a Celery worker is healthy. A reachable API alone does not prove the full processing pipeline is operational.</span></div>
+          </section> : view !== "Overview" && <section className="panel section-placeholder"><div className="placeholder-icon"><Icon name={view === "Investigations" ? "folder" : view === "Evidence" ? "layers" : view === "Analysis jobs" ? "activity" : "file"} size={25} /></div><h2>{view} workspace</h2><p>{`This ${view.toLowerCase()} view is scaffolded for the next integration milestone. The current dashboard uses sample data and does not yet read or write these records through FastAPI.`}</p><div className="placeholder-actions"><button className="button button-primary" onClick={() => { setView("Overview"); setNotice(""); }}>Back to overview</button>{view === "Investigations" && <button className="button button-secondary" onClick={() => setShowCreate(true)}><Icon name="plus" size={16} /> New investigation</button>}</div></section>}
 
           <footer className="app-footer"><span><span className="footer-status-dot" /> VerityX local preview</span><span>Evidence-led analysis <span className="footer-divider">·</span> Results require human review</span><span>v0.1.0</span></footer>
         </div>

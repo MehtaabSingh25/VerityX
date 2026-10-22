@@ -216,3 +216,16 @@ export function getAnalysisJobEvents(investigationId: string, jobId: string) {
     investigationId,
   );
 }
+
+
+export type OperationsSummary = {
+  generated_at?: string;
+  total_jobs?: number;
+  jobs_by_status?: Record<string, number>;
+  jobs_by_analysis_type?: Record<string, number>;
+  lifecycle_events_by_type?: Record<string, number>;
+};
+
+export function getOperationsSummary() {
+  return requestJson<OperationsSummary>("/operations/summary");
+}
