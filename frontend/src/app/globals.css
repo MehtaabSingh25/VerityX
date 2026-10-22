@@ -304,3 +304,110 @@ tbody tr:hover { background: #141e2e; }
   .forensic-results { padding: 14px; }
   .forensic-result-card { padding: 13px; }
 }
+
+
+/* Upgrade 27: focused dark forensic workspace */
+:root {
+  color-scheme: dark;
+  --background: #090d14;
+  --foreground: #edf2fb;
+  --muted: #a0aec2;
+  --line: #263246;
+  --navy: #0e1624;
+  --blue: #8aa7ff;
+}
+body {
+  background: #090d14;
+  color: #edf2fb;
+  font-size: 15px;
+  line-height: 1.6;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+.topbar,
+.workspace-topbar {
+  display: none !important;
+}
+.main-area,
+.content-wrap,
+.workspace-main,
+.workspace-content {
+  background: #090d14;
+}
+.content-wrap {
+  padding-top: 30px;
+}
+.page-heading h1,
+.workspace-page h1,
+.workspace-main h1 {
+  color: #f4f7ff;
+  font-size: clamp(30px, 3vw, 40px);
+  font-weight: 750;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+.page-heading p,
+.workspace-page p,
+.workspace-main p,
+.panel p,
+.panel .muted,
+label,
+.form-label {
+  color: #b5c1d3;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.panel,
+.card,
+.workspace-panel,
+.investigation-panel,
+.evidence-panel,
+.section-placeholder {
+  background: #111a28;
+  border-color: #29364a;
+  color: #edf2fb;
+}
+.panel h2,
+.panel h3,
+.card h2,
+.card h3,
+.workspace-panel h2,
+.workspace-panel h3 {
+  color: #f1f5ff;
+  font-size: 19px;
+  font-weight: 700;
+}
+button,
+input,
+select,
+textarea {
+  font-size: 15px;
+}
+input,
+select,
+textarea,
+.form-input {
+  background-color: #0c1420;
+  border-color: #35435a;
+  color: #f2f6ff;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #8494ab;
+  opacity: 1;
+}
+table th {
+  color: #aebdd1;
+}
+table td {
+  color: #e0e8f5;
+}
+.app-footer {
+  color: #98a8be;
+  border-color: #263246;
+}
+@media (max-width: 760px) {
+  .content-wrap { padding: 22px 16px; }
+  .page-heading h1,
+  .workspace-page h1,
+  .workspace-main h1 { font-size: 30px; }
+}
