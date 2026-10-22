@@ -112,3 +112,107 @@ export function createIntegrityJob(investigationId: string, mediaAssetId: string
 export function getAnalysisJob(investigationId: string, jobId: string) {
   return requestJson<AnalysisJobResponse>(`/analysis-jobs/${encodeURIComponent(jobId)}`, {}, investigationId);
 }
+
+
+export type ReportEvent = {
+  event_type?: string;
+  status?: string;
+  message?: string | null;
+  created_at?: string | null;
+};
+
+export type ReportJob = {
+  id: string;
+  media_asset_id?: string;
+  analysis_type?: string;
+  status?: string;
+  result?: Record<string, unknown> | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  events?: ReportEvent[];
+};
+
+export type ReportMediaAsset = {
+  id: string;
+  filename?: string;
+  mime_type?: string;
+  size_bytes?: number;
+  sha256?: string;
+  created_at?: string | null;
+  analysis_job_count?: number;
+};
+
+export type SimilarityMatch = Record<string, unknown>;
+
+export type InvestigationReport = {
+  report_schema_version?: string;
+  generated_at?: string;
+  investigation?: {
+    id?: string;
+    title?: string;
+    description?: string | null;
+    status?: string;
+    created_at?: string | null;
+    updated_at?: string | null;
+  };
+  summary?: {
+    media_asset_count?: number;
+    analysis_job_count?: number;
+    analysis_jobs_by_status?: Record<string, number>;
+    analysis_jobs_by_type?: Record<string, number>;
+    integrity_mismatch_count?: number;
+    similarity_match_count?: number;
+  };
+  findings?: {
+    integrity_mismatches?: Record<string, unknown>[];
+    similarity_matches?: SimilarityMatch[];
+  };
+  media_assets?: ReportMediaAsset[];
+  analysis_jobs?: ReportJob[];
+  methodology?: {
+    limitations?: string[];
+    [key: string]: unknown;
+  };
+};
+
+export type SimilarityResponse = {
+  result_count?: number;
+  matches?: SimilarityMatch[];
+  limitations?: string[];
+  algorithm?: string;
+};
+
+export function getInvestigationReport(
+  investigationId: string,
+  maxDistance = 10,
+  similarityLimit = 100,
+) {
+  const query = new URLSearchParams({ max_distance: String(maxDistance), similarity_limit: String(similarityLimit) });
+  return requestJson<InvestigationReport>(
+    `/investigations/${encodeURIComponent(investigationId)}/report?${query.toString()}`,
+    {},
+    investigationId,
+  );
+}
+
+export function getInvestigationSimilarity(
+  investigationId: string,
+  maxDistance = 10,
+  limit = 100,
+) {
+  const query = new URLSearchParams({ max_distance: String(maxDistance), limit: String(limit) });
+  return requestJson<SimilarityResponse>(
+    `/investigations/${encodeURIComponent(investigationId)}/similarity?${query.toString()}`,
+    {},
+    investigationId,
+  );
+}
+
+export function getAnalysisJobEvents(investigationId: string, jobId: string) {
+  return requestJson<ReportEvent[]>(
+    `/analysis-jobs/${encodeURIComponent(jobId)}/events`,
+    {},
+    investigationId,
+  );
+}

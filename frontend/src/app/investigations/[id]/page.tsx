@@ -141,7 +141,7 @@ export default function InvestigationWorkspacePage() {
         <div className="workspace-breadcrumb"><button onClick={() => router.push("/")}>Investigations</button><span>/</span><strong>{investigationId}</strong></div>
         <section className="workspace-heading">
           <div><div className="workspace-eyebrow">INVESTIGATION WORKSPACE</div><h1>Evidence intake</h1><p>Review candidate media, stage files for analysis, and preserve an evidence-first workflow.</p></div>
-          <span className="workspace-case-id">CASE ID <strong>{investigationId}</strong></span>
+          <div className="workspace-heading-actions"><span className="workspace-case-id">CASE ID <strong>{investigationId}</strong></span><button className="workspace-primary-button" onClick={() => router.push(`/investigations/${encodeURIComponent(investigationId)}/reports`)}>View report & findings</button></div>
         </section>
 
         {!isRealInvestigation ? <div className="workspace-demo-notice"><span>ⓘ</span><div><strong>Sample investigation</strong><p>This dashboard row is illustrative and is not a database record. Create a new investigation from the dashboard before uploading evidence.</p></div></div> : <div className="workspace-demo-notice workspace-live-notice"><span>✓</span><div><strong>Connected workspace</strong><p>Uploads and integrity-check submissions are sent to the configured FastAPI backend. This page currently lists files selected in this browser session; it does not yet fetch the full stored evidence inventory after refresh.</p></div></div>}
