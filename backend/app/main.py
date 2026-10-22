@@ -9,6 +9,7 @@ from app.api.analysis_jobs import router as analysis_jobs_router
 from app.api.similarity import router as similarity_router
 from app.api.reports import router as reports_router
 from app.api.operations import router as operations_router
+from app.api.web_image_search import router as web_image_search_router
 from app.db.session import engine
 from app.core.observability import (
     RequestObservabilityMiddleware, configure_logging, render_metrics,
@@ -33,6 +34,7 @@ app.include_router(analysis_jobs_router)
 app.include_router(similarity_router)
 app.include_router(reports_router)
 app.include_router(operations_router, dependencies=[Depends(require_api_key)])
+app.include_router(web_image_search_router)
 app.add_middleware(RequestObservabilityMiddleware)
 
 

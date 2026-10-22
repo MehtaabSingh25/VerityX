@@ -41,6 +41,7 @@ services:
       API_KEY: ${VERITYX_API_KEY:?Set VERITYX_API_KEY in .env}
       MEDIA_STORAGE_DIR: /app/data/media
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
+      GOOGLE_CLOUD_VISION_API_KEY: ${GOOGLE_CLOUD_VISION_API_KEY:-}
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -50,9 +51,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command:
+      [
+        "sh",
+        "-c",
+        "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000",
+      ]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -76,7 +88,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO"]
+    command:
+      ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO"]
 
   outbox-dispatcher:
     build:
