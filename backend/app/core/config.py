@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     media_storage_dir: str = "data/media"
     max_upload_size_bytes: int = 50 * 1024 * 1024
     redis_url: str = "redis://localhost:6379/0"
+    api_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_file="../.env",

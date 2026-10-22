@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -15,6 +15,7 @@ from app.core.observability import (
 from redis import Redis
 from redis.exceptions import RedisError
 from app.core.config import settings
+from app.core.security import require_api_key
 
 configure_logging()
 
@@ -23,11 +24,12 @@ app = FastAPI(
     description="Digital media forensics and provenance investigations",
     version="0.2.0",
 )
-app.include_router(media_router)
-app.include_router(analysis_jobs_router)
-app.include_router(similarity_router)
-app.include_router(reports_router)
-app.include_router(operations_router)
+protected = [Depends(require_api_key)]
+app.include_router(media_router, dependencies=protected)
+app.include_router(analysis_jobs_router, dependencies=protected)
+app.include_router(similarity_router, dependencies=protected)
+app.include_router(reports_router, dependencies=protected)
+app.include_router(operations_router, dependencies=protected)
 app.add_middleware(RequestObservabilityMiddleware)
 
 

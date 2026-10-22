@@ -38,6 +38,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://verityx:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/verityx
       REDIS_URL: redis://redis:6379/0
+      API_KEY: ${VERITYX_API_KEY:?Set VERITYX_API_KEY in .env}
       MEDIA_STORAGE_DIR: /app/data/media
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
     ports:

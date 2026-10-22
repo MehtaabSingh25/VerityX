@@ -308,3 +308,25 @@ The API is bound to `127.0.0.1:8000` by default. Check `http://127.0.0.1:8000/he
 ## End-to-end workflow tests
 
 `backend/tests/test_investigation_workflow.py` exercises investigation creation, media upload, analysis-job execution, event retrieval, and report generation against an isolated SQLite database. The tests run the real analysis task body synchronously and replace only the Celery broker handoff, so they do not require local PostgreSQL or Redis services. Run them with `python -m pytest -q` from `backend`; production-like broker and database behavior should still be smoke-tested with Docker Compose separately.
+
+
+## API key protection
+
+VerityX supports an `X-API-Key` header for its `/api/v1/*` routes. For local
+development, leave `API_KEY` unset to run without authentication. The Docker
+Compose deployment requires `VERITYX_API_KEY` in the repository-root `.env`
+file and passes it to the API container. Generate a long, random secret and
+never commit `.env` or expose the key in a public browser bundle.
+
+Example request:
+
+```powershell
+$headers = @{ "X-API-Key" = "<your-local-api-key>" }
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v1/operations/summary" -Headers $headers
+```
+
+This is a simple shared-secret gate, not user identity or per-investigation
+authorization. Before multi-user or public deployment, add user authentication,
+role-based authorization, rate limiting, and secret rotation. `/health` and
+`/metrics` remain outside this API-key dependency and should be restricted at
+the network or reverse-proxy layer when exposed beyond a trusted host.
