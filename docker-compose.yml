@@ -78,6 +78,26 @@ services:
         condition: service_healthy
     command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO"]
 
+  outbox-dispatcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: verityx-outbox-dispatcher
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://verityx:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/verityx
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_STORAGE_DIR: /app/data/media
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
+    volumes:
+      - media_data:/app/data/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "app.outbox_dispatcher"]
+
 volumes:
   postgres_data:
   media_data:

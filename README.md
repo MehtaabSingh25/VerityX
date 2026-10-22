@@ -358,3 +358,10 @@ Apply the schema update with `alembic upgrade head` before using this feature.
 ## Worker retry and duplicate-delivery regression tests
 
 `backend/tests/test_worker_reliability.py` covers transient storage failures that schedule a Celery retry, permanent analysis errors that persist a terminal failed state, and duplicate delivery of an already-completed job. Run with `python -m pytest -q` from `backend`. These tests exercise the task body against isolated SQLite persistence; a real Redis/Celery worker smoke test is still needed to validate broker delivery and process-loss behavior.
+
+
+### Transactional outbox for analysis jobs
+
+Analysis-job creation writes the queued job and a durable outbox message in the same PostgreSQL transaction. The API attempts an immediate publish for low latency, while the dedicated `outbox-dispatcher` service retries messages when Redis is unavailable. Outbox delivery is **at least once**, so task handlers must remain safe under duplicate delivery. Failed publishes use bounded exponential backoff, and stale dispatcher claims can be reclaimed after a lease timeout.
+
+The outbox dispatcher is included in the Docker Compose stack. After upgrading, rebuild services with `docker compose up --build -d`.

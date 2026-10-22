@@ -12,13 +12,13 @@ from app.core.investigation_access import verify_investigation_token
 from app.core.observability import (
     ANALYSIS_JOB_ENQUEUE_FAILURES, ANALYSIS_JOBS_SUBMITTED,
 )
-from app.models import AnalysisJob, AnalysisJobEvent, MediaAsset
+from app.models import AnalysisJob, AnalysisJobEvent, MediaAsset, OutboxMessage
 from app.schemas.jobs import (
     AnalysisJobCreate,
     AnalysisJobEventRead,
     AnalysisJobRead,
 )
-from app.tasks.analysis import run_analysis_job
+from app.outbox import publish_outbox_message
 
 router = APIRouter(prefix="/api/v1", tags=["analysis jobs"])
 
@@ -120,28 +120,25 @@ def create_analysis_job(
         status="queued",
         message="Analysis job accepted and queued.",
     ))
+    outbox_message = OutboxMessage(
+        analysis_job_id=job.id,
+        task_name="verityx.run_analysis_job",
+        payload={"job_id": str(job.id)},
+        status="pending",
+    )
+    db.add(outbox_message)
+    # The job and its publish request commit atomically. A separate relay keeps
+    # retrying if Redis is temporarily unavailable after this transaction.
     db.commit()
     db.refresh(job)
+    db.refresh(outbox_message)
     ANALYSIS_JOBS_SUBMITTED.labels(payload.analysis_type).inc()
 
-    try:
-        run_analysis_job.delay(str(job.id))
-    except Exception as exc:
+    published = publish_outbox_message(outbox_message.id, db)
+    db.refresh(outbox_message)
+    if not published and outbox_message.last_error:
         ANALYSIS_JOB_ENQUEUE_FAILURES.labels(payload.analysis_type).inc()
-        job.status = "failed"
-        job.error_message = "Could not enqueue analysis job; check Redis availability"
-        db.add(AnalysisJobEvent(
-            analysis_job_id=job.id,
-            event_type="enqueue_failed",
-            status="failed",
-            message="Analysis queue unavailable; the job was not enqueued.",
-        ))
-        db.commit()
-        raise HTTPException(
-            status_code=503,
-            detail="Analysis queue unavailable",
-        ) from exc
-
+    db.refresh(job)
     return job
 
 

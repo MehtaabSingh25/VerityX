@@ -40,6 +40,7 @@ def workflow_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
     import app.api.operations as operations_api
     import app.api.reports as reports_api
     import app.api.similarity as similarity_api
+    import app.outbox as outbox
     import app.tasks.analysis as analysis_tasks
     from app.core.config import settings
 
@@ -57,9 +58,9 @@ def workflow_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator
 
     # Execute the real task body synchronously instead of requiring a broker.
     monkeypatch.setattr(
-        analysis_jobs_api.run_analysis_job,
+        outbox.run_analysis_job,
         "delay",
-        lambda job_id: analysis_jobs_api.run_analysis_job.run(job_id),
+        lambda job_id: outbox.run_analysis_job.run(job_id),
     )
 
     with TestClient(app) as client:
