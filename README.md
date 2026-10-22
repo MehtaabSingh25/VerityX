@@ -354,3 +354,7 @@ returns the existing job instead of submitting duplicate work. Reusing a key for
 a different analysis type returns `409 Conflict`. Keys are scoped to a media asset;
 clients should generate a fresh key for each distinct intended submission.
 Apply the schema update with `alembic upgrade head` before using this feature.
+
+## Worker retry and duplicate-delivery regression tests
+
+`backend/tests/test_worker_reliability.py` covers transient storage failures that schedule a Celery retry, permanent analysis errors that persist a terminal failed state, and duplicate delivery of an already-completed job. Run with `python -m pytest -q` from `backend`. These tests exercise the task body against isolated SQLite persistence; a real Redis/Celery worker smoke test is still needed to validate broker delivery and process-loss behavior.
