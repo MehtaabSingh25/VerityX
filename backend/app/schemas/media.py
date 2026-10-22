@@ -26,6 +26,17 @@ class InvestigationRead(BaseModel):
     created_at: datetime
 
 
+class InvestigationCreated(InvestigationRead):
+    """Investigation response; access token is shown only at creation/rotation."""
+
+    access_token: str
+
+
+class InvestigationAccessToken(BaseModel):
+    investigation_id: UUID
+    access_token: str
+
+
 class MediaAssetRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

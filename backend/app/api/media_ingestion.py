@@ -2,16 +2,20 @@ import hashlib
 import os
 import uuid
 from pathlib import Path
-from typing import Iterator
+from typing import Annotated, Iterator
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.investigation_access import issue_investigation_token, verify_investigation_token
+from app.core.security import require_api_key
 from app.db.session import SessionLocal
 from app.models import Investigation, MediaAsset
-from app.schemas.media import InvestigationCreate, InvestigationRead, MediaAssetRead
+from app.schemas.media import (
+    InvestigationAccessToken, InvestigationCreate, InvestigationCreated, MediaAssetRead,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["media and investigations"])
 CHUNK_SIZE = 1024 * 1024
@@ -54,15 +58,18 @@ def allowed_extension(filename: str, detected_type: str) -> bool:
 
 @router.post(
     "/investigations",
-    response_model=InvestigationRead,
+    response_model=InvestigationCreated,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_api_key)],
 )
 def create_investigation(
     payload: InvestigationCreate, db: Session = Depends(get_db)
-) -> Investigation:
+) -> dict:
+    access_token, token_hash = issue_investigation_token()
     investigation = Investigation(
         title=payload.title,
         description=payload.description,
+        access_token_hash=token_hash,
     )
     db.add(investigation)
     try:
@@ -73,7 +80,32 @@ def create_investigation(
         raise HTTPException(
             status_code=503, detail="Could not save investigation"
         ) from exc
-    return investigation
+    return {
+        "id": investigation.id,
+        "title": investigation.title,
+        "description": investigation.description,
+        "status": investigation.status,
+        "created_at": investigation.created_at,
+        "access_token": access_token,
+    }
+
+
+@router.post(
+    "/investigations/{investigation_id}/access-token/rotate",
+    response_model=InvestigationAccessToken,
+    dependencies=[Depends(require_api_key)],
+)
+def rotate_investigation_token(
+    investigation_id: uuid.UUID, db: Session = Depends(get_db)
+) -> dict:
+    """Rotate a scoped token using the trusted service API key."""
+    investigation = db.get(Investigation, investigation_id)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    access_token, token_hash = issue_investigation_token()
+    investigation.access_token_hash = token_hash
+    db.commit()
+    return {"investigation_id": investigation.id, "access_token": access_token}
 
 
 @router.post(
@@ -84,11 +116,13 @@ def create_investigation(
 async def upload_media(
     investigation_id: uuid.UUID,
     file: UploadFile = File(...),
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
     db: Session = Depends(get_db),
 ) -> MediaAsset:
     investigation = db.get(Investigation, investigation_id)
     if investigation is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
+    verify_investigation_token(investigation, investigation_token)
 
     filename = Path(file.filename or "").name.strip()
     if (

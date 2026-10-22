@@ -24,12 +24,13 @@ app = FastAPI(
     description="Digital media forensics and provenance investigations",
     version="0.2.0",
 )
-protected = [Depends(require_api_key)]
-app.include_router(media_router, dependencies=protected)
-app.include_router(analysis_jobs_router, dependencies=protected)
-app.include_router(similarity_router, dependencies=protected)
-app.include_router(reports_router, dependencies=protected)
-app.include_router(operations_router, dependencies=protected)
+# Investigation creation/token rotation and operations require the service key.
+# Resource endpoints use a narrower per-investigation token instead.
+app.include_router(media_router)
+app.include_router(analysis_jobs_router)
+app.include_router(similarity_router)
+app.include_router(reports_router)
+app.include_router(operations_router, dependencies=[Depends(require_api_key)])
 app.add_middleware(RequestObservabilityMiddleware)
 
 

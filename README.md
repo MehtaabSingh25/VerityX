@@ -310,23 +310,36 @@ The API is bound to `127.0.0.1:8000` by default. Check `http://127.0.0.1:8000/he
 `backend/tests/test_investigation_workflow.py` exercises investigation creation, media upload, analysis-job execution, event retrieval, and report generation against an isolated SQLite database. The tests run the real analysis task body synchronously and replace only the Celery broker handoff, so they do not require local PostgreSQL or Redis services. Run them with `python -m pytest -q` from `backend`; production-like broker and database behavior should still be smoke-tested with Docker Compose separately.
 
 
-## API key protection
+## API and investigation-scoped access
 
-VerityX supports an `X-API-Key` header for its `/api/v1/*` routes. For local
-development, leave `API_KEY` unset to run without authentication. The Docker
-Compose deployment requires `VERITYX_API_KEY` in the repository-root `.env`
-file and passes it to the API container. Generate a long, random secret and
-never commit `.env` or expose the key in a public browser bundle.
+The service `X-API-Key` is required for investigation creation, token rotation,
+and the operations summary when `VERITYX_API_KEY` is configured. Local
+development can leave `API_KEY` unset, but that disables the service-key gate
+and is suitable only for a trusted local environment. The Docker Compose
+configuration requires `VERITYX_API_KEY` in the repository-root `.env` file.
+Never commit `.env` or expose the service key in a public browser bundle.
 
-Example request:
+Create an investigation with the service key:
 
 ```powershell
-$headers = @{ "X-API-Key" = "<your-local-api-key>" }
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/v1/operations/summary" -Headers $headers
+$serviceHeaders = @{ "X-API-Key" = "<your-local-api-key>" }
+$created = Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:8000/api/v1/investigations" `
+  -Headers $serviceHeaders `
+  -ContentType "application/json" `
+  -Body '{"title":"Evidence review"}'
+$investigationToken = $created.access_token
+$headers = @{ "X-Investigation-Token" = $investigationToken }
 ```
 
-This is a simple shared-secret gate, not user identity or per-investigation
-authorization. Before multi-user or public deployment, add user authentication,
-role-based authorization, rate limiting, and secret rotation. `/health` and
-`/metrics` remain outside this API-key dependency and should be restricted at
-the network or reverse-proxy layer when exposed beyond a trusted host.
+Use the returned `X-Investigation-Token` for uploads, analysis jobs, job event
+history, similarity search, and reports for that investigation. The token is
+returned only at creation or rotation; PostgreSQL stores only its SHA-256 digest.
+The service key is an administrative credential, not a user identity system.
+`/health` and `/metrics` remain outside these authentication checks and should
+be restricted at the network or reverse-proxy layer when exposed beyond a
+trusted host.
+
+
+Rotate a token with `POST /api/v1/investigations/{investigation_id}/access-token/rotate`; this invalidates the previous token. Existing investigations created before this migration have no scoped token and require a rotation before scoped endpoints can access them. The service key is a trusted administrative credential; do not expose it to untrusted clients.

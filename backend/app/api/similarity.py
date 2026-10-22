@@ -1,11 +1,12 @@
-from typing import Iterator
+from typing import Annotated, Iterator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.core.investigation_access import verify_investigation_token
 from app.models import AnalysisJob, Investigation, MediaAsset
 from app.services.similarity import find_similarity_matches
 
@@ -25,12 +26,14 @@ def search_investigation_similarity(
     investigation_id: UUID,
     max_distance: int = Query(default=10, ge=0, le=64),
     limit: int = Query(default=100, ge=1, le=500),
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
     db: Session = Depends(get_db),
 ) -> dict:
     """Compare completed image and sampled-video dHashes in one investigation."""
     investigation = db.get(Investigation, investigation_id)
     if investigation is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
+    verify_investigation_token(investigation, investigation_token)
 
     statement = (
         select(MediaAsset, AnalysisJob)

@@ -1,11 +1,12 @@
-from typing import Iterator
+from typing import Annotated, Iterator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.core.investigation_access import verify_investigation_token
 from app.core.observability import (
     ANALYSIS_JOB_ENQUEUE_FAILURES, ANALYSIS_JOBS_SUBMITTED,
 )
@@ -36,11 +37,13 @@ def get_db() -> Iterator[Session]:
 def create_analysis_job(
     media_asset_id: UUID,
     payload: AnalysisJobCreate,
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
     db: Session = Depends(get_db),
 ) -> AnalysisJob:
     media = db.get(MediaAsset, media_asset_id)
     if media is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
+    verify_investigation_token(media.investigation, investigation_token)
 
     image_only_analysis = {"metadata_extract", "perceptual_hash"}
     video_only_analysis = {"video_metadata", "video_frame_fingerprints"}
@@ -105,11 +108,13 @@ def create_analysis_job(
 )
 def get_analysis_job(
     job_id: UUID,
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
     db: Session = Depends(get_db),
 ) -> AnalysisJob:
     job = db.get(AnalysisJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
+    verify_investigation_token(job.media_asset.investigation, investigation_token)
     return job
 
 
@@ -119,11 +124,13 @@ def get_analysis_job(
 )
 def list_analysis_job_events(
     job_id: UUID,
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
     db: Session = Depends(get_db),
 ) -> list[AnalysisJobEvent]:
     job = db.get(AnalysisJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
+    verify_investigation_token(job.media_asset.investigation, investigation_token)
 
     statement = (
         select(AnalysisJobEvent)
