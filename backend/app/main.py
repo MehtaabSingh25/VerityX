@@ -82,3 +82,6 @@ def health_check():
         "redis": redis_status,
         "version": "0.2.0",
     }
+
+from app.observability import install_metrics
+install_metrics(app)
