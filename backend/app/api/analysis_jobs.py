@@ -68,7 +68,7 @@ def create_analysis_job(
                 )
             return existing
 
-    image_only_analysis = {"metadata_extract", "perceptual_hash"}
+    image_only_analysis = {"metadata_extract", "perceptual_hash", "ai_image_detection"}
     video_only_analysis = {"video_metadata", "video_frame_fingerprints"}
     if (
         payload.analysis_type in image_only_analysis

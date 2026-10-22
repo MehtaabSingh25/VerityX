@@ -3,3 +3,4 @@ redis>=5,<7
 Pillow>=11,<13
 opencv-python-headless>=4.10,<5
 prometheus-client>=0.21,<1
+transformers>=4.44,<5

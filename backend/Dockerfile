@@ -13,6 +13,7 @@ RUN apt-get update \
 
 COPY requirements.txt requirements-async.txt ./
 RUN python -m pip install --upgrade pip \
+    && python -m pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple "torch>=2.4,<3" \
     && python -m pip install -r requirements.txt -r requirements-async.txt
 
 COPY app ./app

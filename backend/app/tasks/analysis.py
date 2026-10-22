@@ -12,6 +12,7 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models import AnalysisJob, AnalysisJobEvent, MediaAsset
+from app.services.ai_detection import detect_ai_image
 from app.services.media_analysis import (
     compute_difference_hash,
     extract_image_metadata,
@@ -149,6 +150,10 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
                         "perceptual_hash currently supports image files only"
                     )
                 result = compute_difference_hash(path)
+            elif job.analysis_type == "ai_image_detection":
+                if not media.mime_type.startswith("image/"):
+                    raise ValueError("ai_image_detection currently supports image files only")
+                result = detect_ai_image(path)
             elif job.analysis_type == "video_metadata":
                 if not media.mime_type.startswith("video/"):
                     raise ValueError("video_metadata currently supports video files only")
