@@ -88,7 +88,11 @@ export default function InvestigationReportPage() {
     }
   }, [investigationId, maxDistance, limit]);
 
-  useEffect(() => { void loadReport(); }, [loadReport]);
+  useEffect(() => {
+    // Defer the async load so its loading/error state updates do not run in the effect body.
+    const task = Promise.resolve().then(() => loadReport());
+    void task;
+  }, [loadReport]);
 
   const jobs = report?.analysis_jobs ?? [];
   const mediaAssets = report?.media_assets ?? [];

@@ -102,7 +102,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (view === "Settings") void refreshOperations();
+    if (view !== "Settings") return;
+    // Defer the request so its state updates run after this effect completes.
+    const task = Promise.resolve().then(() => refreshOperations());
+    void task;
   }, [view, refreshOperations]);
 
   async function createInvestigation(event: FormEvent<HTMLFormElement>) {
