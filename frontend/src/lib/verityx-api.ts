@@ -109,6 +109,33 @@ export function createIntegrityJob(investigationId: string, mediaAssetId: string
   }, investigationId);
 }
 
+export function createAiDetectionJob(investigationId: string, mediaAssetId: string) {
+  return requestJson<AnalysisJobResponse>(`/media/${encodeURIComponent(mediaAssetId)}/analysis-jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ analysis_type: "ai_image_detection" }),
+  }, investigationId);
+}
+
+export type PublicWebImageSearchResponse = {
+  provider?: string;
+  result_count?: number;
+  pages_with_matching_images?: { url: string; page_title?: string | null; full_matching_image_urls?: string[]; partial_matching_image_urls?: string[] }[];
+  visually_similar_image_urls?: string[];
+  full_matching_image_urls?: string[];
+  partial_matching_image_urls?: string[];
+  web_entities?: { description: string; score?: number | null }[];
+  limitations?: string[];
+};
+
+export function searchPublicWebImage(investigationId: string, mediaAssetId: string) {
+  return requestJson<PublicWebImageSearchResponse>(
+    `/media/${encodeURIComponent(mediaAssetId)}/web-image-search`,
+    { method: "POST" },
+    investigationId,
+  );
+}
+
 export function getAnalysisJob(investigationId: string, jobId: string) {
   return requestJson<AnalysisJobResponse>(`/analysis-jobs/${encodeURIComponent(jobId)}`, {}, investigationId);
 }

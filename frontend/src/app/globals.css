@@ -174,3 +174,21 @@ a { color: inherit; text-decoration: none; }
 .operations-count { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 10px; border: 1px solid #eef1f6; border-radius: 7px; }.operations-count span { color: #8792a4; font-size: 9px; text-transform: capitalize; overflow-wrap: anywhere; }.operations-count strong { color: #4c5b75; font-size: 12px; }.operations-muted { margin: 0; color: #a0a8b6; font-size: 9px; }
 .operations-message { padding: 20px 18px; color: #8994a5; font-size: 10px; line-height: 1.6; }.operations-message.error { color: #8e5a5a; }.operations-message strong { color: #a34444; }.operations-message p { margin: 6px 0 12px; }.operations-footnote { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 9px; padding: 12px 14px; border: 1px solid #f1e4bc; border-radius: 8px; background: #fff9e9; color: #806b31; font-size: 9px; line-height: 1.6; }.operations-footnote svg { flex: 0 0 auto; margin-top: 1px; }
 @media (max-width: 900px) { .operations-layout { grid-template-columns: 1fr; }.operations-footnote { grid-column: 1; } }
+
+
+/* Upgrade 23: evidence-linked AI detection and public-web search results. */
+.forensic-results { padding: 18px 20px; border-top: 1px solid #e8ebf2; display: grid; gap: 12px; }
+.forensic-results-heading h3 { margin: 0; font-size: 13px; color: #20283a; }
+.forensic-results-heading p { margin: 5px 0 0; font-size: 10px; color: #7e8799; }
+.forensic-result-card { border: 1px solid #e8ebf2; border-radius: 8px; padding: 13px 14px; background: #fcfcfe; display: grid; gap: 12px; min-width: 0; }
+.forensic-result-title { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 10px; color: #30394d; }
+.forensic-result-title span { color: #68748a; }
+.forensic-result-section { border-top: 1px solid #edf0f5; padding-top: 10px; min-width: 0; }
+.forensic-result-section h4 { margin: 0 0 8px; font-size: 11px; color: #30394d; }
+.forensic-result-section p, .forensic-result-section li { font-size: 10px; line-height: 1.6; color: #68748a; overflow-wrap: anywhere; }
+.forensic-result-section ul { margin: 7px 0; padding-left: 17px; display: grid; gap: 7px; }
+.forensic-result-section li a { color: #5268ce; overflow-wrap: anywhere; }
+.forensic-result-section li span { display: block; font-size: 9px; color: #929bad; overflow-wrap: anywhere; }
+.forensic-result-section details { margin-top: 9px; font-size: 10px; color: #5268ce; }
+.forensic-disclaimer { padding: 8px 10px; background: #f4f6fb; border-radius: 5px; }
+@media (max-width: 680px) { .forensic-results { padding: 14px; } .forensic-result-card { padding: 10px; } }
