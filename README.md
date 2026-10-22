@@ -191,7 +191,9 @@ Frontend linting, integration testing, and CI checks will be documented as those
 
 ## Asynchronous analysis jobs
 
-The backend supports a first asynchronous analysis task: checking whether a stored media file's SHA-256 hash still matches its database record. PostgreSQL stores job status and results; Redis is used as the Celery broker.
+The asynchronous analysis pipeline supports three jobs: checking whether a stored file's SHA-256 hash still matches its ingestion record, extracting basic image properties with a conservative EXIF allowlist, and computing a 64-bit difference hash (dHash) for coarse image similarity. PostgreSQL stores job status and results; Redis is used as the Celery broker. Image analysis uses Pillow and currently supports image assets only; video metadata extraction is not implemented yet.
+
+The metadata extractor intentionally omits GPS coordinates and arbitrary EXIF fields from its returned result. dHash is a similarity fingerprint, not a cryptographic integrity check and not proof that two files are identical or manipulated.
 
 Install the additional worker dependencies from the backend directory:
 
@@ -217,7 +219,7 @@ In another backend terminal, start a development worker. On Windows, `--pool=sol
 celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=solo
 ```
 
-Submit an integrity-check job for a media asset:
+Submit an analysis job for a media asset:
 
 ```http
 POST /api/v1/media/{media_asset_id}/analysis-jobs
@@ -226,13 +228,18 @@ Content-Type: application/json
 {"analysis_type": "integrity_check"}
 ```
 
+For image assets, the supported `analysis_type` values also include:
+
+- `metadata_extract` — basic dimensions, format, mode, and an EXIF allowlist.
+- `perceptual_hash` — a 64-bit difference hash for coarse visual similarity.
+
 The API returns a job record with a UUID and initial status. Poll its status using:
 
 ```http
 GET /api/v1/analysis-jobs/{job_id}
 ```
 
-Possible states are `queued`, `running`, `completed`, and `failed`. The initial integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
+Possible states are `queued`, `running`, `completed`, and `failed`. The integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. Image jobs return structured metadata or a dHash result in the job's `result` field. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
 
 ## Roadmap
 
@@ -241,9 +248,10 @@ Possible states are `queued`, `running`, `completed`, and `failed`. The initial 
 - [ ] Define investigation, media asset, and analysis job models
 - [ ] Implement validated media uploads and SHA-256 hashing
 - [ ] Add Redis and Celery background processing
-- [ ] Implement metadata extraction and perceptual hashing
+- [x] Implement initial image metadata extraction and difference hashing
 - [ ] Add video frame extraction and media comparison
 - [ ] Build the investigation dashboard and evidence visualization
+- [ ] Add video metadata extraction through an optional ffprobe integration
 - [ ] Add structured reports and analysis provenance
 - [ ] Implement integration tests, observability, and deployment automation
 

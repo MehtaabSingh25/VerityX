@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict
 
 
 class AnalysisJobCreate(BaseModel):
-    analysis_type: Literal["integrity_check"] = "integrity_check"
+    analysis_type: Literal[
+        "integrity_check", "metadata_extract", "perceptual_hash"
+    ] = "integrity_check"
 
 
 class AnalysisJobRead(BaseModel):

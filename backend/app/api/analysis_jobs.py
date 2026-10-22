@@ -34,6 +34,16 @@ def create_analysis_job(
     if media is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
 
+    image_only_analysis = {"metadata_extract", "perceptual_hash"}
+    if (
+        payload.analysis_type in image_only_analysis
+        and not media.mime_type.startswith("image/")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{payload.analysis_type} currently supports image files only",
+        )
+
     job = AnalysisJob(
         media_asset_id=media_asset_id,
         analysis_type=payload.analysis_type,

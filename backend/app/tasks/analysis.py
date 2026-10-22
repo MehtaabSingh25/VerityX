@@ -10,6 +10,10 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models import AnalysisJob, MediaAsset
+from app.services.media_analysis import (
+    compute_difference_hash,
+    extract_image_metadata,
+)
 
 
 def compute_integrity_result(
@@ -85,11 +89,23 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
         db.commit()
 
         try:
-            if job.analysis_type != "integrity_check":
-                raise ValueError(f"Unsupported analysis type: {job.analysis_type}")
-
             path = _media_path(media.storage_key or "")
-            result = compute_integrity_result(path, media.sha256)
+            if job.analysis_type == "integrity_check":
+                result = compute_integrity_result(path, media.sha256)
+            elif job.analysis_type == "metadata_extract":
+                if not media.mime_type.startswith("image/"):
+                    raise ValueError(
+                        "metadata_extract currently supports image files only"
+                    )
+                result = extract_image_metadata(path)
+            elif job.analysis_type == "perceptual_hash":
+                if not media.mime_type.startswith("image/"):
+                    raise ValueError(
+                        "perceptual_hash currently supports image files only"
+                    )
+                result = compute_difference_hash(path)
+            else:
+                raise ValueError(f"Unsupported analysis type: {job.analysis_type}")
             job.result = result
             job.status = "completed"
             job.error_message = None
