@@ -10,6 +10,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -83,6 +84,12 @@ class MediaAsset(Base):
 
 class AnalysisJob(Base):
     __tablename__ = "analysis_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "media_asset_id", "idempotency_key",
+            name="uq_analysis_jobs_media_idempotency_key",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -94,6 +101,9 @@ class AnalysisJob(Base):
     )
     analysis_type: Mapped[str] = mapped_column(
         String(100), nullable=False
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True
     )
     status: Mapped[str] = mapped_column(
         String(30), nullable=False, default="queued"

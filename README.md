@@ -343,3 +343,14 @@ trusted host.
 
 
 Rotate a token with `POST /api/v1/investigations/{investigation_id}/access-token/rotate`; this invalidates the previous token. Existing investigations created before this migration have no scoped token and require a rotation before scoped endpoints can access them. The service key is a trusted administrative credential; do not expose it to untrusted clients.
+
+
+## Idempotent analysis-job submission
+
+Clients may send an optional `Idempotency-Key` header when creating an analysis
+job. Keys must contain 1-128 ASCII letters, digits, periods, underscores, colons,
+or hyphens. For the same media asset, repeating the same key and analysis type
+returns the existing job instead of submitting duplicate work. Reusing a key for
+a different analysis type returns `409 Conflict`. Keys are scoped to a media asset;
+clients should generate a fresh key for each distinct intended submission.
+Apply the schema update with `alembic upgrade head` before using this feature.

@@ -1,8 +1,10 @@
+import re
 from typing import Annotated, Iterator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -38,12 +40,33 @@ def create_analysis_job(
     media_asset_id: UUID,
     payload: AnalysisJobCreate,
     investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     db: Session = Depends(get_db),
 ) -> AnalysisJob:
     media = db.get(MediaAsset, media_asset_id)
     if media is None:
         raise HTTPException(status_code=404, detail="Media asset not found")
     verify_investigation_token(media.investigation, investigation_token)
+
+    if idempotency_key is not None:
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", idempotency_key):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid Idempotency-Key; use 1-128 letters, digits, '.', '_', ':', or '-'",
+            )
+        existing = db.scalar(
+            select(AnalysisJob).where(
+                AnalysisJob.media_asset_id == media_asset_id,
+                AnalysisJob.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            if existing.analysis_type != payload.analysis_type:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different analysis type",
+                )
+            return existing
 
     image_only_analysis = {"metadata_extract", "perceptual_hash"}
     video_only_analysis = {"video_metadata", "video_frame_fingerprints"}
@@ -67,10 +90,30 @@ def create_analysis_job(
     job = AnalysisJob(
         media_asset_id=media_asset_id,
         analysis_type=payload.analysis_type,
+        idempotency_key=idempotency_key,
         status="queued",
     )
     db.add(job)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        # A concurrent request may have inserted the same key after our lookup.
+        db.rollback()
+        if idempotency_key is not None:
+            existing = db.scalar(
+                select(AnalysisJob).where(
+                    AnalysisJob.media_asset_id == media_asset_id,
+                    AnalysisJob.idempotency_key == idempotency_key,
+                )
+            )
+            if existing is not None and existing.analysis_type == payload.analysis_type:
+                return existing
+            if existing is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency-Key was already used for a different analysis type",
+                ) from exc
+        raise HTTPException(status_code=409, detail="Could not create a unique analysis job") from exc
     db.add(AnalysisJobEvent(
         analysis_job_id=job.id,
         event_type="queued",

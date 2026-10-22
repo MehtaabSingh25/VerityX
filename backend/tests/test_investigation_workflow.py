@@ -200,3 +200,66 @@ def test_service_key_can_rotate_investigation_token(workflow_client: TestClient)
     )
     assert old_access.status_code == 403
     assert new_access.status_code == 200
+
+
+def test_analysis_job_submission_is_idempotent(workflow_client: TestClient) -> None:
+    client = workflow_client
+    created = client.post("/api/v1/investigations", json={"title": "Idempotency test"})
+    assert created.status_code == 201
+    investigation_id = created.json()["id"]
+    headers = {"X-Investigation-Token": created.json()["access_token"]}
+    uploaded = client.post(
+        f"/api/v1/investigations/{investigation_id}/media",
+        files={"file": ("evidence.png", _png_bytes(), "image/png")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    media_id = uploaded.json()["id"]
+    headers["Idempotency-Key"] = "integrity-check-001"
+
+    first = client.post(
+        f"/api/v1/media/{media_id}/analysis-jobs",
+        json={"analysis_type": "integrity_check"},
+        headers=headers,
+    )
+    second = client.post(
+        f"/api/v1/media/{media_id}/analysis-jobs",
+        json={"analysis_type": "integrity_check"},
+        headers=headers,
+    )
+    assert first.status_code == second.status_code == 202
+    assert first.json()["id"] == second.json()["id"]
+
+    conflict = client.post(
+        f"/api/v1/media/{media_id}/analysis-jobs",
+        json={"analysis_type": "metadata_extract"},
+        headers=headers,
+    )
+    assert conflict.status_code == 409
+
+    summary = client.get("/api/v1/operations/summary")
+    assert summary.status_code == 200
+    assert summary.json()["total_jobs"] == 1
+
+
+def test_analysis_job_idempotency_key_format_is_validated(
+    workflow_client: TestClient,
+) -> None:
+    client = workflow_client
+    created = client.post("/api/v1/investigations", json={"title": "Invalid key test"})
+    headers = {
+        "X-Investigation-Token": created.json()["access_token"],
+        "Idempotency-Key": "contains spaces",
+    }
+    uploaded = client.post(
+        f"/api/v1/investigations/{created.json()['id']}/media",
+        files={"file": ("evidence.png", _png_bytes(), "image/png")},
+        headers={"X-Investigation-Token": created.json()["access_token"]},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    response = client.post(
+        f"/api/v1/media/{uploaded.json()['id']}/analysis-jobs",
+        json={"analysis_type": "integrity_check"},
+        headers=headers,
+    )
+    assert response.status_code == 400
