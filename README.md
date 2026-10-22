@@ -287,3 +287,17 @@ VerityX can compare completed image `perceptual_hash` jobs with other image fing
 Generate an on-demand JSON report for an investigation with `GET /api/v1/investigations/{investigation_id}/report`. Optional query parameters `max_distance` (0–64, default 10) and `similarity_limit` (1–500, default 100) control candidate similarity findings. The report includes an inventory of media assets, analysis-job statuses and results, recorded job lifecycle events, integrity mismatches, and cross-media similarity candidates.
 
 Reports are generated from the current database records and include a generation timestamp and schema version; they are not immutable exports or tamper-proof audit artifacts. Export or preserve a report separately if a fixed snapshot is required. The report excludes GPS coordinates and arbitrary EXIF fields. Similarity matches are candidate leads only, and a SHA-256 mismatch indicates a difference from the ingestion digest rather than proving malicious tampering.
+
+## Containerized backend stack
+
+The backend can be run with Docker Compose alongside PostgreSQL and Redis. Set `POSTGRES_PASSWORD` in a root `.env` file before starting the stack; use a strong local-only value and never commit the file. The API container runs Alembic migrations before starting FastAPI, and the Celery worker starts only after the API health check succeeds. Both containers mount the same private media volume so uploaded files are available to background jobs.
+
+Build and start the complete backend stack from the repository root:
+
+```bash
+docker compose up --build -d
+docker compose ps
+docker compose logs -f api worker
+```
+
+The API is bound to `127.0.0.1:8000` by default. Check `http://127.0.0.1:8000/health` and `http://127.0.0.1:8000/docs`. PostgreSQL and Redis ports remain bound to localhost for development. This Compose configuration is a reproducible single-host deployment baseline, not a hardened public production deployment; add TLS, authentication/authorization, secret management, backups, and network restrictions before exposing it to untrusted users.
