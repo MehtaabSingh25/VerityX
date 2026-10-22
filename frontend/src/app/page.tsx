@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
+import { checkBackendHealth, createInvestigation as createInvestigationApi } from "@/lib/verityx-api";
 
 type Status = "Complete" | "Processing" | "Queued";
 type View = "Overview" | "Investigations" | "Evidence" | "Analysis jobs" | "Reports" | "Settings";
@@ -66,32 +67,56 @@ export default function Home() {
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [notice, setNotice] = useState("");
+  const [apiStatus, setApiStatus] = useState<"checking" | "connected" | "offline">("checking");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   const filteredInvestigations = useMemo(() => investigations.filter((item) => {
     const matchesSearch = `${item.title} ${item.id} ${item.description}`.toLowerCase().includes(search.toLowerCase());
     return matchesSearch && (statusFilter === "All statuses" || item.status === statusFilter);
   }), [investigations, search, statusFilter]);
 
-  function createInvestigation(event: FormEvent<HTMLFormElement>) {
+  // The overview still contains clearly labelled sample metrics, but new investigations
+  // are written to the configured FastAPI backend.
+  useEffect(() => {
+    let active = true;
+    checkBackendHealth().then((healthy) => {
+      if (active) setApiStatus(healthy ? "connected" : "offline");
+    });
+    return () => { active = false; };
+  }, []);
+
+  async function createInvestigation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const title = newTitle.trim();
-    if (!title) return;
-    const item: Investigation = {
-      id: `VX-DEMO-${String(investigations.length + 1).padStart(3, "0")}`,
-      title,
-      description: newDescription.trim() || "New investigation · Demo workspace",
-      assets: 0,
-      status: "Queued",
-      updated: "Just now",
-      initials: title.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(""),
-      tone: "blue",
-    };
-    setInvestigations((current) => [item, ...current]);
-    setNewTitle("");
-    setNewDescription("");
-    setShowCreate(false);
-    setView("Investigations");
-    setNotice("Demo investigation created locally. Connect the API to persist real investigations.");
+    if (!title || creating) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      const created = await createInvestigationApi({ title, description: newDescription.trim() || null });
+      const item: Investigation = {
+        id: created.id,
+        title: created.title,
+        description: created.description || "New investigation · Backend record",
+        assets: 0,
+        status: "Queued",
+        updated: "Just now",
+        initials: title.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(""),
+        tone: "blue",
+      };
+      setInvestigations((current) => [item, ...current]);
+      setNewTitle("");
+      setNewDescription("");
+      setShowCreate(false);
+      setView("Investigations");
+      setApiStatus("connected");
+      setNotice("Investigation created in the backend. Upload evidence from its workspace.");
+      router.push(`/investigations/${encodeURIComponent(created.id)}`);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : "Could not create the investigation.");
+    } finally {
+      setCreating(false);
+    }
   }
 
   const pageDescriptions: Record<View, string> = {
@@ -132,7 +157,7 @@ export default function Home() {
       <section className="main-area">
         <header className="topbar">
           <div className="breadcrumb"><span>Workspace</span><Icon name="chevron" size={14} /><strong>{view}</strong></div>
-          <div className="topbar-actions"><span className="environment-chip"><span /> Demo workspace</span><button className="icon-button notification-button" aria-label="Notifications" onClick={() => setNotice("No live notifications are connected in this dashboard preview.")}><Icon name="bell" size={19} /><i /></button><div className="topbar-divider" /><div className="topbar-avatar">M</div></div>
+          <div className="topbar-actions"><span className={`environment-chip ${apiStatus === "connected" ? "api-connected" : ""}`}><span /> {apiStatus === "checking" ? "Checking API" : apiStatus === "connected" ? "API connected" : "API offline"}</span><button className="icon-button notification-button" aria-label="Notifications" onClick={() => setNotice("No live notifications are connected in this dashboard preview.")}><Icon name="bell" size={19} /><i /></button><div className="topbar-divider" /><div className="topbar-avatar">M</div></div>
         </header>
 
         <div className="content-wrap" id="overview">
@@ -142,7 +167,7 @@ export default function Home() {
           </div>
 
           {notice && <div className="notice-banner" role="status"><Icon name="shield" size={17} /><span>{notice}</span><button aria-label="Dismiss message" onClick={() => setNotice("")}><Icon name="close" size={15} /></button></div>}
-          <div className="demo-banner"><span className="demo-banner-icon"><Icon name="activity" size={16} /></span><span><strong>Frontend preview</strong> — counts and case records below are illustrative sample data, not live backend results.</span><button onClick={() => setView("Settings")}>Connect API <Icon name="arrow" size={14} /></button></div>
+          <div className="demo-banner"><span className="demo-banner-icon"><Icon name="activity" size={16} /></span><span><strong>{apiStatus === "connected" ? "API connected" : "Dashboard preview"}</strong> — overview counts and existing sample cases are illustrative. New investigations and evidence uploads use the configured backend.</span><button onClick={() => setView("Settings")}>Connection settings <Icon name="arrow" size={14} /></button></div>
 
           {view === "Overview" && <>
             <section className="metrics-grid" aria-label="Workspace metrics">
@@ -175,7 +200,7 @@ export default function Home() {
         </div>
       </section>
 
-      {showCreate && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCreate(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><span className="modal-kicker">WORKSPACE</span><h2 id="create-title">New investigation</h2><p>Create a sample case in this local preview.</p></div><button className="icon-button" aria-label="Close dialog" onClick={() => setShowCreate(false)}><Icon name="close" /></button></div><form onSubmit={createInvestigation}><label className="form-label" htmlFor="investigation-title">Investigation name <span>*</span></label><input id="investigation-title" className="form-input" autoFocus required maxLength={120} placeholder="e.g. Media provenance review" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} /><label className="form-label" htmlFor="investigation-description">Description <span className="optional-label">OPTIONAL</span></label><textarea id="investigation-description" className="form-input form-textarea" rows={3} maxLength={500} placeholder="Briefly describe the scope of this investigation" value={newDescription} onChange={(event) => setNewDescription(event.target.value)} /><div className="modal-notice"><Icon name="shield" size={17} /><span>This creates a local demo record only. It will not be saved to PostgreSQL until API integration is implemented.</span></div><div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => setShowCreate(false)}>Cancel</button><button type="submit" className="button button-primary"><Icon name="plus" size={16} /> Create demo case</button></div></form></section></div>}
+      {showCreate && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCreate(false); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><span className="modal-kicker">WORKSPACE</span><h2 id="create-title">New investigation</h2><p>Create a real investigation in the configured VerityX API.</p></div><button className="icon-button" aria-label="Close dialog" onClick={() => setShowCreate(false)}><Icon name="close" /></button></div><form onSubmit={createInvestigation}><label className="form-label" htmlFor="investigation-title">Investigation name <span>*</span></label><input id="investigation-title" className="form-input" autoFocus required maxLength={120} placeholder="e.g. Media provenance review" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} /><label className="form-label" htmlFor="investigation-description">Description <span className="optional-label">OPTIONAL</span></label><textarea id="investigation-description" className="form-input form-textarea" rows={3} maxLength={500} placeholder="Briefly describe the scope of this investigation" value={newDescription} onChange={(event) => setNewDescription(event.target.value)} /><div className="modal-notice"><Icon name="shield" size={17} /><span>The request goes through the server-side API proxy. Keep VERITYX_API_KEY in the server environment, never in a NEXT_PUBLIC variable.</span></div>{createError && <p className="create-error" role="alert">{createError}</p>}<div className="modal-actions"><button type="button" className="button button-secondary" onClick={() => { setShowCreate(false); setCreateError(""); }}>Cancel</button><button type="submit" className="button button-primary" disabled={creating}><Icon name="plus" size={16} /> {creating ? "Creating…" : "Create investigation"}</button></div></form></section></div>}
     </main>
   );
 }
