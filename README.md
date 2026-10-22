@@ -188,6 +188,52 @@ Frontend linting, integration testing, and CI checks will be documented as those
 - Label model predictions, inferred relationships, and uncertainty explicitly.
 - Never present an AI-generated score as definitive proof of authenticity or manipulation.
 
+
+## Asynchronous analysis jobs
+
+The backend supports a first asynchronous analysis task: checking whether a stored media file's SHA-256 hash still matches its database record. PostgreSQL stores job status and results; Redis is used as the Celery broker.
+
+Install the additional worker dependencies from the backend directory:
+
+```bash
+pip install -r requirements-async.txt
+```
+
+Start PostgreSQL and Redis from the repository root:
+
+```bash
+docker compose up -d postgres redis
+```
+
+In one backend terminal, start the API:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+In another backend terminal, start a development worker. On Windows, `--pool=solo` is the practical local-development option; Linux containers are recommended for production workers:
+
+```bash
+celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=solo
+```
+
+Submit an integrity-check job for a media asset:
+
+```http
+POST /api/v1/media/{media_asset_id}/analysis-jobs
+Content-Type: application/json
+
+{"analysis_type": "integrity_check"}
+```
+
+The API returns a job record with a UUID and initial status. Poll its status using:
+
+```http
+GET /api/v1/analysis-jobs/{job_id}
+```
+
+Possible states are `queued`, `running`, `completed`, and `failed`. The initial integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
+
 ## Roadmap
 
 - [ ] Establish the repository and local development environment
