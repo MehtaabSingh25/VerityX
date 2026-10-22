@@ -143,7 +143,7 @@ export default function InvestigationWorkspacePage() {
   function addFiles(files: FileList | File[]) {
     if (!isRealInvestigation) {
       setError(
-        "This is a sample investigation. Create a real investigation from the dashboard before uploading evidence.",
+        "Invalid investigation ID. Return to the dashboard and create a real investigation before uploading evidence.",
       );
       return;
     }
@@ -432,16 +432,6 @@ export default function InvestigationWorkspacePage() {
           <strong>VerityX</strong>
           <span>MEDIA FORENSICS</span>
         </div>
-        <span
-          className={`workspace-demo-chip ${apiOnline ? "workspace-api-chip" : ""}`}
-        >
-          <i />{" "}
-          {isRealInvestigation
-            ? apiOnline
-              ? "API CONNECTED"
-              : "API CHECKING"
-            : "SAMPLE CASE"}
-        </span>
       </header>
 
       <div className="workspace-content">
@@ -453,11 +443,8 @@ export default function InvestigationWorkspacePage() {
         <section className="workspace-heading">
           <div>
             <div className="workspace-eyebrow">INVESTIGATION WORKSPACE</div>
-            <h1>Evidence intake</h1>
-            <p>
-              Review candidate media, stage files for analysis, and preserve an
-              evidence-first workflow.
-            </p>
+            <h1>AI Detection &amp; Web Search</h1>
+            <p>Upload image or video evidence, run available forensic checks, and search public-web image matches for source leads.</p>
           </div>
           <div className="workspace-heading-actions">
             <span className="workspace-case-id">
@@ -476,29 +463,8 @@ export default function InvestigationWorkspacePage() {
           </div>
         </section>
 
-        {!isRealInvestigation ? (
-          <div className="workspace-demo-notice">
-            <span>ⓘ</span>
-            <div>
-              <strong>Sample investigation</strong>
-              <p>
-                This dashboard row is illustrative and is not a database record.
-                Create a new investigation from the dashboard before uploading
-                evidence.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="workspace-demo-notice workspace-live-notice">
-            <span>✓</span>
-            <div>
-              <strong>Connected workspace</strong>
-              <p>
-                Evidence is loaded from persistent backend storage. Deleting an
-                item removes its record and associated analysis data.
-              </p>
-            </div>
-          </div>
+        {!isRealInvestigation && (
+          <div className="workspace-error" role="alert">This is not a valid investigation record. Return to the dashboard and create a real investigation.</div>
         )}
         {notice && (
           <div className="workspace-feedback" role="status">
@@ -529,7 +495,7 @@ export default function InvestigationWorkspacePage() {
             <small>Not uploaded yet</small>
           </article>
           <article>
-            <span>ANALYSIS STATUS</span>
+            <span>QUEUED ANALYSES</span>
             <strong>
               {items.filter((item) => item.state === "Queued").length}
             </strong>
@@ -544,7 +510,7 @@ export default function InvestigationWorkspacePage() {
                 Stored evidence{" "}
                 <span className="workspace-count">{storedMedia.length}</span>
               </h2>
-              <p>Persisted records loaded from the backend</p>
+              <p>Evidence retained for this investigation</p>
             </div>
             <div className="workspace-header-actions">
               <button
@@ -616,7 +582,7 @@ export default function InvestigationWorkspacePage() {
             </div>
           )}
           <div className="workspace-panel-footer">
-            <span><i /> {apiOnline ? "Backend reachable" : "Backend not confirmed"}</span>
+            <span>Stored evidence inventory</span>
             <span>Permanent deletion requires confirmation</span>
           </div>
         </section>
@@ -624,8 +590,8 @@ export default function InvestigationWorkspacePage() {
         <section className="workspace-panel">
           <div className="workspace-panel-header">
             <div>
-              <h2>Add evidence</h2>
-              <p>Supported: JPG, PNG, WebP, MP4, and WebM</p>
+              <h2>Add evidence for analysis</h2>
+              <p>Images: AI detection and public-web image search. Videos: integrity and metadata checks; frame-based web search is not available yet.</p>
             </div>
             <span className="workspace-step">STEP 01 / 03</span>
           </div>
@@ -792,7 +758,7 @@ export default function InvestigationWorkspacePage() {
                                 disabled={!apiOnline}
                                 onClick={() => runAiDetection(item.id)}
                               >
-                                {item.aiJobId ? "Run AI again" : "Detect AI"}
+                                {item.aiJobId ? "Run detection again" : "Run AI detection"}
                               </button>
                               {item.aiJobId && (
                                 <button
@@ -807,7 +773,7 @@ export default function InvestigationWorkspacePage() {
                               >
                                 {item.webSearchLoading
                                   ? "Searching…"
-                                  : "Search web"}
+                                  : "Search public web"}
                               </button>
                             </>
                           )}
@@ -839,7 +805,7 @@ export default function InvestigationWorkspacePage() {
               aria-label="Forensic analysis results"
             >
               <div className="forensic-results-heading">
-                <h3>Forensic results</h3>
+                <h3>Detection &amp; source-search results</h3>
                 <p>
                   Automated signals are investigative leads, not proof of origin
                   or authenticity.
@@ -872,7 +838,7 @@ export default function InvestigationWorkspacePage() {
                       </div>
                       {item.aiJobId && (
                         <div className="forensic-result-section">
-                          <h4>AI-image detection</h4>
+                          <h4>AI-generated image detection</h4>
                           <p>
                             <strong>Assessment:</strong> {interpretation}
                           </p>
@@ -893,7 +859,7 @@ export default function InvestigationWorkspacePage() {
                       {item.webSearchResult && (
                         <div className="forensic-result-section">
                           <h4>
-                            Public-web image search ·{" "}
+                            Public-web image matches ·{" "}
                             {item.webSearchResult.result_count ?? 0} matching
                             pages
                           </h4>
@@ -980,12 +946,8 @@ export default function InvestigationWorkspacePage() {
             </section>
           )}
           <div className="workspace-panel-footer">
-            <span>
-              <i /> {apiOnline ? "Backend reachable" : "Backend not confirmed"}
-            </span>
-            <span>
-              SHA-256 · AI-image detection · provider-indexed web search
-            </span>
+            <span>SHA-256 integrity · AI image detection · public-web image matches</span>
+            <span>Automated results require human review</span>
           </div>
         </section>
         <footer className="workspace-footer">
