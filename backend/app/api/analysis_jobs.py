@@ -2,11 +2,16 @@ from typing import Iterator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.models import AnalysisJob, MediaAsset
-from app.schemas.jobs import AnalysisJobCreate, AnalysisJobRead
+from app.models import AnalysisJob, AnalysisJobEvent, MediaAsset
+from app.schemas.jobs import (
+    AnalysisJobCreate,
+    AnalysisJobEventRead,
+    AnalysisJobRead,
+)
 from app.tasks.analysis import run_analysis_job
 
 router = APIRouter(prefix="/api/v1", tags=["analysis jobs"])
@@ -50,6 +55,13 @@ def create_analysis_job(
         status="queued",
     )
     db.add(job)
+    db.flush()
+    db.add(AnalysisJobEvent(
+        analysis_job_id=job.id,
+        event_type="queued",
+        status="queued",
+        message="Analysis job accepted and queued.",
+    ))
     db.commit()
     db.refresh(job)
 
@@ -58,6 +70,12 @@ def create_analysis_job(
     except Exception as exc:
         job.status = "failed"
         job.error_message = "Could not enqueue analysis job; check Redis availability"
+        db.add(AnalysisJobEvent(
+            analysis_job_id=job.id,
+            event_type="enqueue_failed",
+            status="failed",
+            message="Analysis queue unavailable; the job was not enqueued.",
+        ))
         db.commit()
         raise HTTPException(
             status_code=503,
@@ -79,3 +97,23 @@ def get_analysis_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Analysis job not found")
     return job
+
+
+@router.get(
+    "/analysis-jobs/{job_id}/events",
+    response_model=list[AnalysisJobEventRead],
+)
+def list_analysis_job_events(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+) -> list[AnalysisJobEvent]:
+    job = db.get(AnalysisJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Analysis job not found")
+
+    statement = (
+        select(AnalysisJobEvent)
+        .where(AnalysisJobEvent.analysis_job_id == job_id)
+        .order_by(AnalysisJobEvent.created_at, AnalysisJobEvent.id)
+    )
+    return list(db.scalars(statement).all())

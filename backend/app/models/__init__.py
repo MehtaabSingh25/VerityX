@@ -115,3 +115,23 @@ class AnalysisJob(Base):
     media_asset: Mapped["MediaAsset"] = relationship(
         back_populates="analysis_jobs"
     )
+
+
+class AnalysisJobEvent(Base):
+    """Append-only lifecycle event for an analysis job."""
+
+    __tablename__ = "analysis_job_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    analysis_job_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("analysis_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models import AnalysisJob, MediaAsset
+from app.models import AnalysisJob, AnalysisJobEvent, MediaAsset
 from app.services.media_analysis import (
     compute_difference_hash,
     extract_image_metadata,
@@ -52,6 +52,12 @@ def _mark_failed(job_id: UUID, message: str) -> None:
             return
         job.status = "failed"
         job.error_message = message[:2000]
+        db.add(AnalysisJobEvent(
+            analysis_job_id=job.id,
+            event_type="failed",
+            status="failed",
+            message="Analysis job failed.",
+        ))
         db.commit()
 
 
@@ -81,11 +87,23 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
         if media is None:
             job.status = "failed"
             job.error_message = "Media asset not found"
+            db.add(AnalysisJobEvent(
+                analysis_job_id=job.id,
+                event_type="failed",
+                status="failed",
+                message="The media asset no longer exists.",
+            ))
             db.commit()
             return {"status": "failed", "error": "Media asset not found"}
 
         job.status = "running"
         job.error_message = None
+        db.add(AnalysisJobEvent(
+            analysis_job_id=job.id,
+            event_type="started",
+            status="running",
+            message="Worker started processing the analysis job.",
+        ))
         db.commit()
 
         try:
@@ -109,6 +127,12 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
             job.result = result
             job.status = "completed"
             job.error_message = None
+            db.add(AnalysisJobEvent(
+                analysis_job_id=job.id,
+                event_type="completed",
+                status="completed",
+                message="Analysis completed successfully.",
+            ))
             db.commit()
             return result
 
@@ -121,6 +145,12 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
                     if retry_job is not None:
                         retry_job.status = "queued"
                         retry_job.error_message = str(exc)[:2000]
+                        retry_db.add(AnalysisJobEvent(
+                            analysis_job_id=retry_job.id,
+                            event_type="retry_scheduled",
+                            status="queued",
+                            message="A transient error occurred; the job will be retried.",
+                        ))
                         retry_db.commit()
                 raise self.retry(exc=exc)
 

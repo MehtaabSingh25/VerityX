@@ -191,7 +191,7 @@ Frontend linting, integration testing, and CI checks will be documented as those
 
 ## Asynchronous analysis jobs
 
-The asynchronous analysis pipeline supports three jobs: checking whether a stored file's SHA-256 hash still matches its ingestion record, extracting basic image properties with a conservative EXIF allowlist, and computing a 64-bit difference hash (dHash) for coarse image similarity. PostgreSQL stores job status and results; Redis is used as the Celery broker. Image analysis uses Pillow and currently supports image assets only; video metadata extraction is not implemented yet.
+The asynchronous analysis pipeline supports three jobs: checking whether a stored file's SHA-256 hash still matches its ingestion record, extracting basic image properties with a conservative EXIF allowlist, and computing a 64-bit difference hash (dHash) for coarse image similarity. PostgreSQL stores job status, results, and append-only lifecycle events; Redis is used as the Celery broker. Image analysis uses Pillow and currently supports image assets only; video metadata extraction is not implemented yet.
 
 The metadata extractor intentionally omits GPS coordinates and arbitrary EXIF fields from its returned result. dHash is a similarity fingerprint, not a cryptographic integrity check and not proof that two files are identical or manipulated.
 
@@ -239,7 +239,7 @@ The API returns a job record with a UUID and initial status. Poll its status usi
 GET /api/v1/analysis-jobs/{job_id}
 ```
 
-Possible states are `queued`, `running`, `completed`, and `failed`. The integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. Image jobs return structured metadata or a dHash result in the job's `result` field. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
+Possible states are `queued`, `running`, `completed`, and `failed`. Retrieve the recorded lifecycle with `GET /api/v1/analysis-jobs/{job_id}/events`; events include queueing, worker start, completion, retry scheduling, and terminal failure. Apply database changes with `alembic upgrade head` before using this endpoint. The integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. Image jobs return structured metadata or a dHash result in the job's `result` field. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
 
 ## Roadmap
 
@@ -252,7 +252,8 @@ Possible states are `queued`, `running`, `completed`, and `failed`. The integrit
 - [ ] Add video frame extraction and media comparison
 - [ ] Build the investigation dashboard and evidence visualization
 - [ ] Add video metadata extraction through an optional ffprobe integration
-- [ ] Add structured reports and analysis provenance
+- [x] Record analysis-job lifecycle events for basic processing provenance
+- [ ] Add structured reports and expanded analysis provenance
 - [ ] Implement integration tests, observability, and deployment automation
 
 ## License

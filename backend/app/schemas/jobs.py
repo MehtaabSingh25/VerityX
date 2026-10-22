@@ -22,3 +22,14 @@ class AnalysisJobRead(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AnalysisJobEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    analysis_job_id: UUID
+    event_type: str
+    status: str
+    message: str
+    created_at: datetime
