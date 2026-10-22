@@ -2,13 +2,15 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.media_ingestion import router as media_router
 from app.db.session import engine
 
 app = FastAPI(
     title="VerityX API",
     description="Digital media forensics and provenance investigations",
-    version="0.1.0",
+    version="0.2.0",
 )
+app.include_router(media_router)
 
 
 @app.get("/health")
@@ -26,5 +28,5 @@ def health_check():
         "status": "healthy",
         "service": "verityx-api",
         "database": "connected",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }

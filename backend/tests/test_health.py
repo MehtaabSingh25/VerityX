@@ -13,5 +13,5 @@ def test_health_reports_database_connected():
         "status": "healthy",
         "service": "verityx-api",
         "database": "connected",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }

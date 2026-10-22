@@ -25,3 +25,5 @@ Thumbs.db
 # Local media and generated artifacts
 uploads/
 artifacts/
+# Local media uploads and generated files
+backend/data/
