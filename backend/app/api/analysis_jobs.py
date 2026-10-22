@@ -6,6 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.core.observability import (
+    ANALYSIS_JOB_ENQUEUE_FAILURES, ANALYSIS_JOBS_SUBMITTED,
+)
 from app.models import AnalysisJob, AnalysisJobEvent, MediaAsset
 from app.schemas.jobs import (
     AnalysisJobCreate,
@@ -73,10 +76,12 @@ def create_analysis_job(
     ))
     db.commit()
     db.refresh(job)
+    ANALYSIS_JOBS_SUBMITTED.labels(payload.analysis_type).inc()
 
     try:
         run_analysis_job.delay(str(job.id))
     except Exception as exc:
+        ANALYSIS_JOB_ENQUEUE_FAILURES.labels(payload.analysis_type).inc()
         job.status = "failed"
         job.error_message = "Could not enqueue analysis job; check Redis availability"
         db.add(AnalysisJobEvent(

@@ -1,4 +1,7 @@
 from celery import Celery
+from celery.signals import setup_logging
+
+from app.core.observability import configure_logging
 
 from app.core.config import settings
 
@@ -20,3 +23,9 @@ celery_app.conf.update(
     enable_utc=True,
     task_ignore_result=True,
 )
+
+
+@setup_logging.connect
+def configure_worker_logging(**kwargs) -> None:
+    """Use the same structured JSON logs for Celery worker processes."""
+    configure_logging()

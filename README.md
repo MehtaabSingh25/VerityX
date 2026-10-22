@@ -248,6 +248,14 @@ GET /api/v1/analysis-jobs/{job_id}
 
 Possible states are `queued`, `running`, `completed`, and `failed`. Retrieve the recorded lifecycle with `GET /api/v1/analysis-jobs/{job_id}/events`; events include queueing, worker start, completion, retry scheduling, and terminal failure. Apply database changes with `alembic upgrade head` before using this endpoint. The integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. Image jobs return structured metadata or a dHash result in the job's `result` field. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
 
+## Observability and health checks
+
+The API emits one JSON log object per line. HTTP request logs include a request ID, method, matched route template, response status, and duration; analysis-worker logs include the job ID, analysis type, lifecycle event, duration when completed or failed, and exception type. Logs intentionally avoid media contents, request bodies, credentials, and raw exception messages in structured fields. A stack trace may still appear for worker exceptions to support debugging.
+
+Use `GET /health` to check PostgreSQL and Redis connectivity. It returns `200` when both are reachable and `503` when a dependency is unavailable. `GET /metrics` exposes Prometheus-format metrics for API HTTP request counts and durations, submitted analysis jobs, and enqueue failures. The metrics endpoint is intended for a trusted local or monitoring network; restrict access when deploying publicly.
+
+Because the API and Celery worker run as separate processes, `/metrics` describes the API process only. Worker execution outcomes are currently observable through structured worker logs and persisted job/event records; worker-level Prometheus aggregation is a future improvement.
+
 ## Roadmap
 
 - [ ] Establish the repository and local development environment
@@ -261,7 +269,8 @@ Possible states are `queued`, `running`, `completed`, and `failed`. Retrieve the
 - [x] Add initial video stream metadata extraction with OpenCV
 - [x] Record analysis-job lifecycle events for basic processing provenance
 - [ ] Add structured reports and expanded analysis provenance
-- [ ] Implement integration tests, observability, and deployment automation
+- [x] Add initial API request metrics, dependency health checks, and structured worker logs
+- [ ] Expand integration tests, worker-level metrics aggregation, and deployment automation
 
 ## License
 

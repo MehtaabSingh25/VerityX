@@ -1,4 +1,6 @@
 import hashlib
+import logging
+import time
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -18,6 +20,8 @@ from app.services.video_analysis import (
     extract_video_metadata,
     sample_video_frame_fingerprints,
 )
+
+logger = logging.getLogger("verityx.worker")
 
 
 def compute_integrity_result(
@@ -78,6 +82,7 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
     except ValueError as exc:
         raise ValueError("Invalid analysis job ID") from exc
 
+    task_started = time.perf_counter()
     with SessionLocal() as db:
         job = db.get(AnalysisJob, parsed_job_id)
         if job is None:
@@ -85,6 +90,15 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
 
         # Make repeated delivery safe for already completed jobs.
         if job.status == "completed" and job.result is not None:
+            logger.info(
+                "analysis_job_duplicate_delivery_skipped",
+                extra={
+                    "event": "analysis_job_duplicate_delivery_skipped",
+                    "job_id": str(job.id),
+                    "analysis_type": job.analysis_type,
+                    "status": "completed",
+                },
+            )
             return job.result
 
         media = db.get(MediaAsset, job.media_asset_id)
@@ -102,6 +116,15 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
 
         job.status = "running"
         job.error_message = None
+        logger.info(
+            "analysis_job_started",
+            extra={
+                "event": "analysis_job_started",
+                "job_id": str(job.id),
+                "analysis_type": job.analysis_type,
+                "status": "running",
+            },
+        )
         db.add(AnalysisJobEvent(
             analysis_job_id=job.id,
             event_type="started",
@@ -148,12 +171,32 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
                 message="Analysis completed successfully.",
             ))
             db.commit()
+            logger.info(
+                "analysis_job_completed",
+                extra={
+                    "event": "analysis_job_completed",
+                    "job_id": str(job.id),
+                    "analysis_type": job.analysis_type,
+                    "status": "completed",
+                    "duration_ms": round((time.perf_counter() - task_started) * 1000, 2),
+                },
+            )
             return result
 
         except (OSError, SQLAlchemyError) as exc:
             db.rollback()
             # Retry transient file/DB errors; persist a terminal state after retries.
             if self.request.retries < self.max_retries:
+                logger.warning(
+                    "analysis_job_retry_scheduled",
+                    extra={
+                        "event": "analysis_job_retry_scheduled",
+                        "job_id": str(parsed_job_id),
+                        "analysis_type": job.analysis_type,
+                        "retry_number": self.request.retries + 1,
+                        "error_type": type(exc).__name__,
+                    },
+                )
                 with SessionLocal() as retry_db:
                     retry_job = retry_db.get(AnalysisJob, parsed_job_id)
                     if retry_job is not None:
@@ -169,9 +212,31 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
                 raise self.retry(exc=exc)
 
             _mark_failed(parsed_job_id, str(exc))
+            logger.exception(
+                "analysis_job_failed",
+                extra={
+                    "event": "analysis_job_failed",
+                    "job_id": str(parsed_job_id),
+                    "analysis_type": job.analysis_type,
+                    "status": "failed",
+                    "duration_ms": round((time.perf_counter() - task_started) * 1000, 2),
+                    "error_type": type(exc).__name__,
+                },
+            )
             raise
 
         except Exception as exc:
             db.rollback()
             _mark_failed(parsed_job_id, str(exc))
+            logger.exception(
+                "analysis_job_failed",
+                extra={
+                    "event": "analysis_job_failed",
+                    "job_id": str(parsed_job_id),
+                    "analysis_type": job.analysis_type,
+                    "status": "failed",
+                    "duration_ms": round((time.perf_counter() - task_started) * 1000, 2),
+                    "error_type": type(exc).__name__,
+                },
+            )
             raise
