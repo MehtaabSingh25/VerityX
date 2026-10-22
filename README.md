@@ -266,3 +266,9 @@ Possible states are `queued`, `running`, `completed`, and `failed`. Retrieve the
 ## License
 
 A license has not yet been selected. Until one is added, do not assume others have permission to reuse, distribute, or modify this project.
+
+## Investigation similarity search
+
+VerityX can compare completed image `perceptual_hash` jobs with other image fingerprints and with sampled frames from completed `video_frame_fingerprints` jobs. Use `GET /api/v1/investigations/{investigation_id}/similarity`; the optional `max_distance` query parameter controls the maximum dHash Hamming distance (0–64), and `limit` caps returned matches (1–500). Smaller distances indicate closer bit patterns. The API returns the best sampled-frame match for each pair of media assets, along with frame index/timestamp where available. This is a candidate-discovery aid only: scores are not probabilities, sampled frames can miss content, and similarity does not establish authenticity, common origin, or manipulation.
+
+- [x] Add bounded investigation-level image/video fingerprint similarity search
