@@ -14,6 +14,10 @@ from app.services.media_analysis import (
     compute_difference_hash,
     extract_image_metadata,
 )
+from app.services.video_analysis import (
+    extract_video_metadata,
+    sample_video_frame_fingerprints,
+)
 
 
 def compute_integrity_result(
@@ -122,6 +126,16 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
                         "perceptual_hash currently supports image files only"
                     )
                 result = compute_difference_hash(path)
+            elif job.analysis_type == "video_metadata":
+                if not media.mime_type.startswith("video/"):
+                    raise ValueError("video_metadata currently supports video files only")
+                result = extract_video_metadata(path)
+            elif job.analysis_type == "video_frame_fingerprints":
+                if not media.mime_type.startswith("video/"):
+                    raise ValueError(
+                        "video_frame_fingerprints currently supports video files only"
+                    )
+                result = sample_video_frame_fingerprints(path)
             else:
                 raise ValueError(f"Unsupported analysis type: {job.analysis_type}")
             job.result = result

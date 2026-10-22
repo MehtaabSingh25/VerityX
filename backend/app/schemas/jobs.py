@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict
 
 class AnalysisJobCreate(BaseModel):
     analysis_type: Literal[
-        "integrity_check", "metadata_extract", "perceptual_hash"
+        "integrity_check", "metadata_extract", "perceptual_hash",
+        "video_metadata", "video_frame_fingerprints"
     ] = "integrity_check"
 
 

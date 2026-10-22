@@ -191,7 +191,7 @@ Frontend linting, integration testing, and CI checks will be documented as those
 
 ## Asynchronous analysis jobs
 
-The asynchronous analysis pipeline supports three jobs: checking whether a stored file's SHA-256 hash still matches its ingestion record, extracting basic image properties with a conservative EXIF allowlist, and computing a 64-bit difference hash (dHash) for coarse image similarity. PostgreSQL stores job status, results, and append-only lifecycle events; Redis is used as the Celery broker. Image analysis uses Pillow and currently supports image assets only; video metadata extraction is not implemented yet.
+The asynchronous analysis pipeline supports three jobs: checking whether a stored file's SHA-256 hash still matches its ingestion record, extracting basic image properties with a conservative EXIF allowlist, and computing a 64-bit difference hash (dHash) for coarse image similarity. PostgreSQL stores job status, results, and append-only lifecycle events; Redis is used as the Celery broker. Image analysis uses Pillow. Video analysis uses OpenCV to inspect basic stream properties and sample a bounded set of frames for dHash fingerprints; it does not require a GPU. Video results depend on codec support in the installed OpenCV build and are not authenticity verdicts.
 
 The metadata extractor intentionally omits GPS coordinates and arbitrary EXIF fields from its returned result. dHash is a similarity fingerprint, not a cryptographic integrity check and not proof that two files are identical or manipulated.
 
@@ -233,6 +233,13 @@ For image assets, the supported `analysis_type` values also include:
 - `metadata_extract` — basic dimensions, format, mode, and an EXIF allowlist.
 - `perceptual_hash` — a 64-bit difference hash for coarse visual similarity.
 
+For video assets, the supported `analysis_type` values also include:
+
+- `video_metadata` — container/stream properties reported by OpenCV, including dimensions, FPS, frame count, and estimated duration.
+- `video_frame_fingerprints` — samples up to 12 evenly spaced frames and computes a dHash for each sampled frame.
+
+Install the async/video dependencies with `python -m pip install -r requirements-async.txt`. OpenCV support depends on the installed build and the video's codec. Frame fingerprints are coarse similarity cues, not proof of authenticity or manipulation.
+
 The API returns a job record with a UUID and initial status. Poll its status using:
 
 ```http
@@ -249,9 +256,9 @@ Possible states are `queued`, `running`, `completed`, and `failed`. Retrieve the
 - [ ] Implement validated media uploads and SHA-256 hashing
 - [ ] Add Redis and Celery background processing
 - [x] Implement initial image metadata extraction and difference hashing
-- [ ] Add video frame extraction and media comparison
+- [x] Add bounded video frame sampling and frame-level dHash fingerprints
 - [ ] Build the investigation dashboard and evidence visualization
-- [ ] Add video metadata extraction through an optional ffprobe integration
+- [x] Add initial video stream metadata extraction with OpenCV
 - [x] Record analysis-job lifecycle events for basic processing provenance
 - [ ] Add structured reports and expanded analysis provenance
 - [ ] Implement integration tests, observability, and deployment automation
