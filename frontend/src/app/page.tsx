@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
 
 type Status = "Complete" | "Processing" | "Queued";
@@ -56,6 +57,7 @@ function StatusPill({ status }: { status: Status }) {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [view, setView] = useState<View>("Overview");
   const [investigations, setInvestigations] = useState(initialInvestigations);
   const [search, setSearch] = useState("");
@@ -154,7 +156,7 @@ export default function Home() {
               <article className="panel investigations-panel">
                 <div className="panel-header"><div><h2>Recent investigations</h2><p>Track active cases and evidence intake</p></div><button className="text-button" onClick={() => setView("Investigations")}>View all <Icon name="arrow" size={15} /></button></div>
                 <div className="table-toolbar"><label className="search-field"><Icon name="search" size={17} /><input aria-label="Search investigations" placeholder="Search investigations..." value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></label><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "All statuses" | Status)}><option>All statuses</option><option>Complete</option><option>Processing</option><option>Queued</option></select></div>
-                <div className="table-scroll"><table><thead><tr><th>INVESTIGATION</th><th>ASSETS</th><th>STATUS</th><th>LAST UPDATED</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredInvestigations.length ? filteredInvestigations.slice(0, view === "Overview" ? 4 : undefined).map((item) => <tr key={item.id}><td><div className="case-cell"><div className={`case-avatar ${item.tone}`}>{item.initials}</div><div className="case-copy"><strong>{item.title}</strong><span>{item.id} <span className="case-dot">·</span> {item.description}</span></div></div></td><td><span className="asset-count">{item.assets.toString().padStart(2, "0")}</span></td><td><StatusPill status={item.status} /></td><td><span className="updated-text">{item.updated}</span></td><td><button className="icon-button row-more" aria-label={`More options for ${item.title}`} onClick={() => setNotice(`${item.title} is sample data. Investigation details will be connected to the API in a later frontend milestone.`)}><Icon name="more" size={18} /></button></td></tr>) : <tr><td colSpan={5} className="empty-state">No investigations match those filters.</td></tr>}</tbody></table></div>
+                <div className="table-scroll"><table><thead><tr><th>INVESTIGATION</th><th>ASSETS</th><th>STATUS</th><th>LAST UPDATED</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredInvestigations.length ? filteredInvestigations.slice(0, view === "Overview" ? 4 : undefined).map((item) => <tr key={item.id}><td><div className="case-cell"><div className={`case-avatar ${item.tone}`}>{item.initials}</div><div className="case-copy"><button className="case-open-link" onClick={() => router.push(`/investigations/${encodeURIComponent(item.id)}`)}>{item.title}</button><span>{item.id} <span className="case-dot">·</span> {item.description}</span></div></div></td><td><span className="asset-count">{item.assets.toString().padStart(2, "0")}</span></td><td><StatusPill status={item.status} /></td><td><span className="updated-text">{item.updated}</span></td><td><button className="icon-button row-more" aria-label={`More options for ${item.title}`} onClick={() => setNotice(`${item.title} is sample data. Investigation details will be connected to the API in a later frontend milestone.`)}><Icon name="more" size={18} /></button></td></tr>) : <tr><td colSpan={5} className="empty-state">No investigations match those filters.</td></tr>}</tbody></table></div>
                 <div className="panel-footer"><span>Showing <strong>{filteredInvestigations.length}</strong> of <strong>{investigations.length}</strong> sample investigations</span><button className="pagination-button" onClick={() => { setSearch(""); setStatusFilter("All statuses"); }}>Reset filters</button></div>
               </article>
 
