@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from app.security import install_security
 
 from app.api.media_ingestion import router as media_router
 from app.api.analysis_jobs import router as analysis_jobs_router
@@ -24,6 +25,7 @@ app = FastAPI(
     description="Digital media forensics and provenance investigations",
     version="0.2.0",
 )
+install_security(app)
 # Investigation creation/token rotation and operations require the service key.
 # Resource endpoints use a narrower per-investigation token instead.
 app.include_router(media_router)
