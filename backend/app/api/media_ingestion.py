@@ -1,10 +1,12 @@
 import hashlib
+import logging
 import os
 import uuid
 from pathlib import Path
 from typing import Annotated, Iterator
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -12,7 +14,7 @@ from app.core.config import settings
 from app.core.investigation_access import issue_investigation_token, verify_investigation_token
 from app.core.security import require_api_key
 from app.db.session import SessionLocal
-from app.models import Investigation, MediaAsset
+from app.models import AnalysisJobEvent, Investigation, MediaAsset, OutboxMessage
 from app.schemas.media import (
     InvestigationAccessToken, InvestigationCreate, InvestigationCreated, MediaAssetRead,
 )
@@ -212,3 +214,83 @@ async def upload_media(
     finally:
         temp_path.unlink(missing_ok=True)
         await file.close()
+
+
+@router.get(
+    "/investigations/{investigation_id}/media",
+    response_model=list[MediaAssetRead],
+)
+def list_investigation_media(
+    investigation_id: uuid.UUID,
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
+    db: Session = Depends(get_db),
+) -> list[MediaAsset]:
+    """Return the persisted evidence inventory for one authorized investigation."""
+    investigation = db.get(Investigation, investigation_id)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    verify_investigation_token(investigation, investigation_token)
+    statement = (
+        select(MediaAsset)
+        .where(MediaAsset.investigation_id == investigation_id)
+        .order_by(MediaAsset.created_at.desc(), MediaAsset.id.desc())
+    )
+    return list(db.scalars(statement).all())
+
+
+@router.delete(
+    "/investigations/{investigation_id}/media/{media_asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_investigation_media(
+    investigation_id: uuid.UUID,
+    media_asset_id: uuid.UUID,
+    investigation_token: Annotated[str | None, Header(alias="X-Investigation-Token")] = None,
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete one evidence item and its analysis records from the owning case."""
+    investigation = db.get(Investigation, investigation_id)
+    if investigation is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+    verify_investigation_token(investigation, investigation_token)
+
+    asset = db.scalar(
+        select(MediaAsset).where(
+            MediaAsset.id == media_asset_id,
+            MediaAsset.investigation_id == investigation_id,
+        )
+    )
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Evidence item not found")
+
+    storage_key = asset.storage_key
+    storage_root = Path(settings.media_storage_dir).resolve()
+    stored_path: Path | None = None
+    if storage_key:
+        candidate = (storage_root / storage_key).resolve()
+        # Never unlink a path outside the configured evidence directory.
+        if candidate != storage_root and storage_root in candidate.parents:
+            stored_path = candidate
+
+    try:
+        job_ids = [job.id for job in asset.analysis_jobs]
+        if job_ids:
+            db.query(OutboxMessage).filter(OutboxMessage.analysis_job_id.in_(job_ids)).delete(
+                synchronize_session=False
+            )
+            db.query(AnalysisJobEvent).filter(AnalysisJobEvent.analysis_job_id.in_(job_ids)).delete(
+                synchronize_session=False
+            )
+        db.delete(asset)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Could not delete evidence item") from exc
+
+    if stored_path is not None:
+        try:
+            stored_path.unlink(missing_ok=True)
+        except OSError:
+            logging.getLogger(__name__).exception(
+                "Evidence metadata was deleted but stored file cleanup failed"
+            )
