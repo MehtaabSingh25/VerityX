@@ -272,3 +272,9 @@ A license has not yet been selected. Until one is added, do not assume others ha
 VerityX can compare completed image `perceptual_hash` jobs with other image fingerprints and with sampled frames from completed `video_frame_fingerprints` jobs. Use `GET /api/v1/investigations/{investigation_id}/similarity`; the optional `max_distance` query parameter controls the maximum dHash Hamming distance (0–64), and `limit` caps returned matches (1–500). Smaller distances indicate closer bit patterns. The API returns the best sampled-frame match for each pair of media assets, along with frame index/timestamp where available. This is a candidate-discovery aid only: scores are not probabilities, sampled frames can miss content, and similarity does not establish authenticity, common origin, or manipulation.
 
 - [x] Add bounded investigation-level image/video fingerprint similarity search
+
+## Investigation reports
+
+Generate an on-demand JSON report for an investigation with `GET /api/v1/investigations/{investigation_id}/report`. Optional query parameters `max_distance` (0–64, default 10) and `similarity_limit` (1–500, default 100) control candidate similarity findings. The report includes an inventory of media assets, analysis-job statuses and results, recorded job lifecycle events, integrity mismatches, and cross-media similarity candidates.
+
+Reports are generated from the current database records and include a generation timestamp and schema version; they are not immutable exports or tamper-proof audit artifacts. Export or preserve a report separately if a fixed snapshot is required. The report excludes GPS coordinates and arbitrary EXIF fields. Similarity matches are candidate leads only, and a SHA-256 mismatch indicates a difference from the ingestion digest rather than proving malicious tampering.

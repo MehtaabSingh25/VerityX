@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.media_ingestion import router as media_router
 from app.api.analysis_jobs import router as analysis_jobs_router
 from app.api.similarity import router as similarity_router
+from app.api.reports import router as reports_router
 from app.db.session import engine
 
 app = FastAPI(
@@ -15,6 +16,7 @@ app = FastAPI(
 app.include_router(media_router)
 app.include_router(analysis_jobs_router)
 app.include_router(similarity_router)
+app.include_router(reports_router)
 
 
 @app.get("/health")
