@@ -1,6 +1,13 @@
 from app.core.config import settings
 from app.db.base import Base
-from app.models import Investigation, MediaAsset, AnalysisJob, AnalysisJobEvent, OutboxMessage
+from app.models import (
+    Investigation,
+    MediaAsset,
+    AnalysisJob,
+    AnalysisJobEvent,
+    OutboxMessage,
+    EvidenceAuditEvent,
+)
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config

@@ -176,3 +176,55 @@ class OutboxMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class EvidenceAuditEvent(Base):
+    """Hash-linked evidence provenance event."""
+
+    __tablename__ = "evidence_audit_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "investigation_id",
+            "sequence_number",
+            name="uq_evidence_audit_investigation_sequence",
+        ),
+        Index(
+            "ix_evidence_audit_investigation_sequence",
+            "investigation_id",
+            "sequence_number",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    investigation_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("investigations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    media_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sequence_number: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )
+    event_data: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False
+    )
+    previous_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    event_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )

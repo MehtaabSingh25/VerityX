@@ -18,6 +18,7 @@ from app.models import AnalysisJobEvent, Investigation, MediaAsset, OutboxMessag
 from app.schemas.media import (
     InvestigationAccessToken, InvestigationCreate, InvestigationCreated, InvestigationListItem, MediaAssetRead,
 )
+from app.services.evidence_audit import append_audit_event
 
 router = APIRouter(prefix="/api/v1", tags=["media and investigations"])
 CHUNK_SIZE = 1024 * 1024
@@ -231,7 +232,25 @@ async def upload_media(
             storage_key=storage_key,
         )
         db.add(asset)
+
         try:
+            # Ensure the asset has its database ID before creating the audit event.
+            db.flush()
+
+            append_audit_event(
+                db,
+                investigation_id=investigation_id,
+                media_asset_id=asset.id,
+                event_type="media.uploaded",
+                event_data={
+                    "sha256": asset.sha256,
+                    "size_bytes": asset.size_bytes,
+                    "mime_type": asset.mime_type,
+                    "original_filename": asset.original_filename,
+                },
+            )
+
+            # Persist the media asset and audit event together.
             db.commit()
             db.refresh(asset)
         except SQLAlchemyError as exc:
@@ -240,6 +259,7 @@ async def upload_media(
             raise HTTPException(
                 status_code=503, detail="Could not save media metadata"
             ) from exc
+
         return asset
     finally:
         temp_path.unlink(missing_ok=True)

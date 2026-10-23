@@ -21,6 +21,7 @@ from app.services.video_analysis import (
     extract_video_metadata,
     sample_video_frame_fingerprints,
 )
+from app.services.evidence_audit import append_audit_event
 
 logger = logging.getLogger("verityx.worker")
 
@@ -138,6 +139,19 @@ def run_analysis_job(self: Task, job_id: str) -> dict[str, Any]:
             path = _media_path(media.storage_key or "")
             if job.analysis_type == "integrity_check":
                 result = compute_integrity_result(path, media.sha256)
+
+                append_audit_event(
+                    db,
+                    investigation_id=media.investigation_id,
+                    media_asset_id=media.id,
+                    event_type="media.integrity_check.completed",
+                    event_data={
+                        "analysis_job_id": str(job.id),
+                        "expected_sha256": result["expected_sha256"],
+                        "actual_sha256": result["actual_sha256"],
+                        "matches": result["matches"],
+                    },
+                )
             elif job.analysis_type == "metadata_extract":
                 if not media.mime_type.startswith("image/"):
                     raise ValueError(
