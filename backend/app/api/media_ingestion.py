@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Iterator
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,7 @@ from app.core.security import require_api_key
 from app.db.session import SessionLocal
 from app.models import AnalysisJobEvent, Investigation, MediaAsset, OutboxMessage
 from app.schemas.media import (
-    InvestigationAccessToken, InvestigationCreate, InvestigationCreated, MediaAssetRead,
+    InvestigationAccessToken, InvestigationCreate, InvestigationCreated, InvestigationListItem, MediaAssetRead,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["media and investigations"])
@@ -90,6 +90,36 @@ def create_investigation(
         "created_at": investigation.created_at,
         "access_token": access_token,
     }
+
+
+@router.get(
+    "/investigations",
+    response_model=list[InvestigationListItem],
+    dependencies=[Depends(require_api_key)],
+)
+def list_investigations(db: Session = Depends(get_db)) -> list[dict]:
+    """List persisted investigation summaries for the trusted workspace UI.
+
+    The service API key is supplied server-side by the frontend proxy. Scoped
+    investigation access tokens are never included in this response.
+    """
+    rows = db.execute(
+        select(Investigation, func.count(MediaAsset.id).label("media_asset_count"))
+        .outerjoin(MediaAsset, MediaAsset.investigation_id == Investigation.id)
+        .group_by(Investigation.id)
+        .order_by(Investigation.created_at.desc(), Investigation.id.desc())
+    ).all()
+    return [
+        {
+            "id": investigation.id,
+            "title": investigation.title,
+            "description": investigation.description,
+            "status": investigation.status,
+            "created_at": investigation.created_at,
+            "media_asset_count": int(media_asset_count),
+        }
+        for investigation, media_asset_count in rows
+    ]
 
 
 @router.post(

@@ -47,3 +47,9 @@ class MediaAssetRead(BaseModel):
     mime_type: str
     size_bytes: int
     created_at: datetime
+
+
+class InvestigationListItem(InvestigationRead):
+    """Investigation summary for the trusted workspace dashboard."""
+
+    media_asset_count: int = 0

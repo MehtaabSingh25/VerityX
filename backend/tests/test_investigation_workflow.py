@@ -264,3 +264,24 @@ def test_analysis_job_idempotency_key_format_is_validated(
         headers=headers,
     )
     assert response.status_code == 400
+
+
+
+def test_investigation_list_returns_persisted_summaries_without_tokens(
+    workflow_client: TestClient,
+) -> None:
+    client = workflow_client
+    created = client.post(
+        "/api/v1/investigations",
+        json={"title": "Persisted case", "description": "Dashboard list test"},
+    )
+    assert created.status_code == 201
+
+    response = client.get("/api/v1/investigations")
+    assert response.status_code == 200, response.text
+    records = response.json()
+    record = next(item for item in records if item["id"] == created.json()["id"])
+    assert record["title"] == "Persisted case"
+    assert record["media_asset_count"] == 0
+    assert "access_token" not in record
+    assert "access_token_hash" not in record

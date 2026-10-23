@@ -9,6 +9,15 @@ export type InvestigationResponse = {
   token?: string;
 };
 
+export type InvestigationListItem = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+  media_asset_count: number;
+};
+
 export type MediaResponse = {
   id: string;
   investigation_id: string;
@@ -82,6 +91,10 @@ export async function checkBackendHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export function listInvestigations() {
+  return requestJson<InvestigationListItem[]>("/investigations");
 }
 
 export function createInvestigation(payload: { title: string; description: string | null }) {

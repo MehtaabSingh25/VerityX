@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { createInvestigation as createInvestigationApi, getOperationsSummary, type OperationsSummary } from "@/lib/verityx-api";
+import { createInvestigation as createInvestigationApi, getOperationsSummary, listInvestigations as listInvestigationsApi, type OperationsSummary } from "@/lib/verityx-api";
 
 type Status = "Open" | "Complete" | "Processing" | "Queued";
 type View = "Overview" | "Investigations" | "Evidence" | "Analysis jobs" | "Reports" | "Settings";
@@ -54,6 +54,8 @@ export default function Home() {
   const router = useRouter();
   const [view, setView] = useState<View>("Overview");
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
+  const [investigationsLoading, setInvestigationsLoading] = useState(true);
+  const [investigationsError, setInvestigationsError] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All statuses" | Status>("All statuses");
   const [showCreate, setShowCreate] = useState(false);
@@ -82,6 +84,43 @@ export default function Home() {
       setOperationsLoading(false);
     }
   }, []);
+
+  const refreshInvestigations = useCallback(async () => {
+    setInvestigationsLoading(true);
+    setInvestigationsError("");
+    try {
+      const records = await listInvestigationsApi();
+      setInvestigations(records.map((record) => {
+        const normalizedStatus = (record.status || "open").toLowerCase();
+        const status: Status = normalizedStatus === "complete" || normalizedStatus === "completed"
+          ? "Complete"
+          : normalizedStatus === "processing"
+            ? "Processing"
+            : normalizedStatus === "queued"
+              ? "Queued"
+              : "Open";
+        return {
+          id: record.id,
+          title: record.title,
+          description: record.description || "",
+          assets: record.media_asset_count || 0,
+          status,
+          updated: record.created_at ? new Date(record.created_at).toLocaleString() : "—",
+          initials: record.title.split(/\\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join(""),
+          tone: "blue",
+        };
+      }));
+    } catch (error) {
+      setInvestigationsError(error instanceof Error ? error.message : "Could not load investigations.");
+    } finally {
+      setInvestigationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const task = Promise.resolve().then(() => refreshInvestigations());
+    void task;
+  }, [refreshInvestigations]);
 
   useEffect(() => {
     if (view !== "Settings") return;
@@ -116,6 +155,7 @@ export default function Home() {
         tone: "blue",
       };
       setInvestigations((current) => [item, ...current]);
+      void refreshInvestigations();
       setNewTitle("");
       setNewDescription("");
       setShowCreate(false);
@@ -179,10 +219,11 @@ export default function Home() {
           {notice && <div className="notice-banner" role="status"><Icon name="shield" size={17} /><span>{notice}</span><button aria-label="Dismiss message" onClick={() => setNotice("")}><Icon name="close" size={15} /></button></div>}
 
           {(view === "Overview" || view === "Investigations") && <section className="panel investigations-panel real-investigations-panel">
-            <div className="panel-header"><div><h2>Investigations</h2><p>Cases created in this session. Open a case to manage evidence and run forensic analysis.</p></div><button className="text-button" onClick={() => setShowCreate(true)}><Icon name="plus" size={15} /> New investigation</button></div>
+            <div className="panel-header"><div><h2>Investigations</h2><p>Persisted investigations from your VerityX database. Open a case to manage evidence and run forensic analysis.</p></div><button className="text-button" onClick={() => setShowCreate(true)}><Icon name="plus" size={15} /> New investigation</button></div>
             <div className="table-toolbar"><label className="search-field"><Icon name="search" size={17} /><input aria-label="Search investigations" placeholder="Search investigations…" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌕</kbd></label><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "All statuses" | Status)}><option>All statuses</option><option>Open</option><option>Complete</option><option>Processing</option><option>Queued</option></select></div>
-            <div className="table-scroll"><table><thead><tr><th>INVESTIGATION</th><th>EVIDENCE</th><th>STATUS</th><th>CREATED</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredInvestigations.length ? filteredInvestigations.map((item) => <tr key={item.id}><td><div className="case-cell"><div className="case-avatar blue">{item.initials || "VX"}</div><div className="case-copy"><button className="case-open-link" onClick={() => router.push(`/investigations/${encodeURIComponent(item.id)}`)}>{item.title}</button><span>{item.id}{item.description ? ` · ${item.description}` : ""}</span></div></div></td><td><span className="asset-count">{item.assets.toString().padStart(2, "0")}</span></td><td><StatusPill status={item.status} /></td><td><span className="updated-text">{item.updated}</span></td><td><button className="text-button" onClick={() => router.push(`/investigations/${encodeURIComponent(item.id)}`)}>Open <Icon name="arrow" size={14} /></button></td></tr>) : <tr><td colSpan={5} className="empty-state"><div className="dashboard-empty-state"><span className="dashboard-empty-icon"><Icon name="folder" size={24} /></span><strong>{search || statusFilter !== "All statuses" ? "No matching investigations" : "No investigations yet"}</strong><span>{search || statusFilter !== "All statuses" ? "Try a different search or filter." : "Create a real investigation to start uploading evidence, detecting AI-generated images, and searching public-web image matches."}</span>{!search && statusFilter === "All statuses" && <button className="button button-primary" onClick={() => setShowCreate(true)}><Icon name="plus" size={16} /> Create investigation</button>}</div></td></tr>}</tbody></table></div>
-            <div className="panel-footer"><span><strong>{filteredInvestigations.length}</strong> investigation{filteredInvestigations.length === 1 ? "" : "s"} in this session</span><button className="pagination-button" onClick={() => { setSearch(""); setStatusFilter("All statuses"); }}>Reset filters</button></div>
+            {investigationsError && <div className="notice-banner" role="alert"><Icon name="shield" size={17} /><span>{investigationsError}</span><button className="text-button" onClick={() => void refreshInvestigations()}>Retry</button></div>}
+            {investigationsLoading ? <div className="empty-state"><p>Loading investigations from the database…</p></div> : <div className="table-scroll"><table><thead><tr><th>INVESTIGATION</th><th>EVIDENCE</th><th>STATUS</th><th>CREATED</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredInvestigations.length ? filteredInvestigations.map((item) => <tr key={item.id}><td><div className="case-cell"><div className="case-avatar blue">{item.initials || "VX"}</div><div className="case-copy"><button className="case-open-link" onClick={() => router.push(`/investigations/${encodeURIComponent(item.id)}`)}>{item.title}</button><span>{item.id}{item.description ? ` · ${item.description}` : ""}</span></div></div></td><td><span className="asset-count">{item.assets.toString().padStart(2, "0")}</span></td><td><StatusPill status={item.status} /></td><td><span className="updated-text">{item.updated}</span></td><td><button className="text-button" onClick={() => router.push(`/investigations/${encodeURIComponent(item.id)}`)}>Open <Icon name="arrow" size={14} /></button></td></tr>) : <tr><td colSpan={5} className="empty-state"><div className="dashboard-empty-state"><span className="dashboard-empty-icon"><Icon name="folder" size={24} /></span><strong>{search || statusFilter !== "All statuses" ? "No matching investigations" : "No investigations yet"}</strong><span>{search || statusFilter !== "All statuses" ? "Try a different search or filter." : "Create a real investigation to start uploading evidence, detecting AI-generated images, and searching public-web image matches."}</span>{!search && statusFilter === "All statuses" && <button className="button button-primary" onClick={() => setShowCreate(true)}><Icon name="plus" size={16} /> Create investigation</button>}</div></td></tr>}</tbody></table></div>}
+            <div className="panel-footer"><span><strong>{filteredInvestigations.length}</strong> investigation{filteredInvestigations.length === 1 ? "" : "s"} loaded</span><button className="pagination-button" onClick={() => { setSearch(""); setStatusFilter("All statuses"); }}>Reset filters</button></div>
           </section>}
 
           {view === "Settings" ? <section className="operations-layout" aria-label="System status and security settings">
