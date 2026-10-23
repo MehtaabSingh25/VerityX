@@ -62,7 +62,7 @@ def compute_difference_hash(file_path: Path) -> dict[str, Any]:
     try:
         with Image.open(file_path) as image:
             image.load()
-            pixels = list(image.convert("L").resize((9, 8)).getdata())
+            pixels = list(image.convert("L").resize((9, 8)).get_flattened_data())
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ValueError("Stored file is not a safely readable image") from exc
 

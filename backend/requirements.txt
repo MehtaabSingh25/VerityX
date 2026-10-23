@@ -45,3 +45,4 @@ websockets==17.3
 prometheus-client==0.24.1
 
 slowapi>=0.1.9,<1
+httpx2==2.16.0
