@@ -29,6 +29,7 @@ type EvidenceItem = {
   assetId?: string;
   jobId?: string;
   jobStatus?: string;
+  jobResult?: Record<string, unknown> | null;
   error?: string;
   aiJobId?: string;
   aiJobStatus?: string;
@@ -265,6 +266,7 @@ export default function InvestigationWorkspacePage() {
                       : "Queued",
                 jobId: job.id,
                 jobStatus: job.status,
+                jobResult: job.result ?? null,
                 error: job.error_message || undefined,
               }
             : candidate,
@@ -297,6 +299,7 @@ export default function InvestigationWorkspacePage() {
                       ? "Failed"
                       : "Queued",
                 jobStatus: job.status,
+                jobResult: job.result ?? null,
                 error: job.error_message || undefined,
               }
             : candidate,
@@ -420,6 +423,50 @@ export default function InvestigationWorkspacePage() {
     }
   }
 
+
+  useEffect(() => {
+    const pendingItems = items.filter((item) =>
+      (item.jobId && ["queued", "running"].includes(item.jobStatus ?? "")) ||
+      (item.aiJobId && ["queued", "running"].includes(item.aiJobStatus ?? "")),
+    );
+    if (pendingItems.length === 0) return;
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      await Promise.all(pendingItems.flatMap((item) => {
+        const requests: Promise<void>[] = [];
+        if (item.jobId && ["queued", "running"].includes(item.jobStatus ?? "")) {
+          requests.push(getAnalysisJob(investigationId, item.jobId).then((job) => {
+            if (cancelled) return;
+            setItems((current) => current.map((candidate) => candidate.id === item.id ? {
+              ...candidate,
+              jobStatus: job.status,
+              jobResult: job.result ?? null,
+              state: job.status === "completed" ? "Completed" : job.status === "failed" ? "Failed" : "Queued",
+              error: job.error_message || candidate.error,
+            } : candidate));
+          }).catch(() => undefined));
+        }
+        if (item.aiJobId && ["queued", "running"].includes(item.aiJobStatus ?? "")) {
+          requests.push(getAnalysisJob(investigationId, item.aiJobId).then((job) => {
+            if (cancelled) return;
+            setItems((current) => current.map((candidate) => candidate.id === item.id ? {
+              ...candidate,
+              aiJobStatus: job.status,
+              aiResult: job.result ?? null,
+              error: job.error_message || candidate.error,
+            } : candidate));
+          }).catch(() => undefined));
+        }
+        return requests;
+      }));
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [items, investigationId]);
 
   return (
     <main className="workspace-page">
@@ -799,7 +846,7 @@ export default function InvestigationWorkspacePage() {
               </table>
             </div>
           )}
-          {items.some((item) => item.aiJobId || item.webSearchResult) && (
+          {items.some((item) => item.jobId || item.aiJobId || item.webSearchResult) && (
             <section
               className="forensic-results"
               aria-label="Forensic analysis results"
@@ -812,12 +859,12 @@ export default function InvestigationWorkspacePage() {
                 </p>
               </div>
               {items
-                .filter((item) => item.aiJobId || item.webSearchResult)
+                .filter((item) => item.jobId || item.aiJobId || item.webSearchResult)
                 .map((item) => {
                   const aiResult = item.aiResult;
                   const interpretation =
-                    aiResult && typeof aiResult.interpretation === "string"
-                      ? aiResult.interpretation.replaceAll("_", " ")
+                    aiResult && typeof aiResult.classification === "string"
+                      ? aiResult.classification.replaceAll("_", " ")
                       : "Result not available yet";
                   const aiScore =
                     aiResult && typeof aiResult.ai_score === "number"
@@ -831,11 +878,29 @@ export default function InvestigationWorkspacePage() {
                       <div className="forensic-result-title">
                         <strong>{item.file.name}</strong>
                         <span>
-                          {item.aiJobStatus
-                            ? `AI detection · ${item.aiJobStatus}`
-                            : "Public-web search"}
+                          {item.jobId
+                            ? `Integrity check · ${item.jobStatus ?? "queued"}`
+                            : item.aiJobStatus
+                              ? `AI detection · ${item.aiJobStatus}`
+                              : "Public-web search"}
                         </span>
                       </div>
+                      {item.jobId && (
+                        <div className="forensic-result-section">
+                          <h4>SHA-256 integrity check</h4>
+                          {item.jobStatus === "completed" && item.jobResult && typeof item.jobResult.matches === "boolean" ? (
+                            <>
+                              <p><strong>Assessment:</strong> {item.jobResult.matches ? "Integrity verified — digest matches the ingestion record." : "INTEGRITY MISMATCH — stored bytes differ from the ingestion digest."}</p>
+                              <p><strong>Expected SHA-256:</strong> <code>{String(item.jobResult.expected_sha256 ?? "Unavailable")}</code></p>
+                              <p><strong>Actual SHA-256:</strong> <code>{String(item.jobResult.actual_sha256 ?? "Unavailable")}</code></p>
+                            </>
+                          ) : item.jobStatus === "failed" ? (
+                            <p role="alert">Integrity check failed: {item.error || "No error details returned."}</p>
+                          ) : (
+                            <p>Integrity check is {item.jobStatus ?? "queued"}. The result will appear automatically when the worker finishes.</p>
+                          )}
+                        </div>
+                      )}
                       {item.aiJobId && (
                         <div className="forensic-result-section">
                           <h4>AI-generated image detection</h4>

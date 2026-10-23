@@ -365,3 +365,74 @@ Apply the schema update with `alembic upgrade head` before using this feature.
 Analysis-job creation writes the queued job and a durable outbox message in the same PostgreSQL transaction. The API attempts an immediate publish for low latency, while the dedicated `outbox-dispatcher` service retries messages when Redis is unavailable. Outbox delivery is **at least once**, so task handlers must remain safe under duplicate delivery. Failed publishes use bounded exponential backoff, and stale dispatcher claims can be reclaimed after a lease timeout.
 
 The outbox dispatcher is included in the Docker Compose stack. After upgrading, rebuild services with `docker compose up --build -d`.
+
+
+## Full-stack single-host deployment (Docker Compose + HTTPS)
+
+This deployment profile runs the Next.js frontend, FastAPI API, PostgreSQL,
+Redis, Celery worker, and transactional outbox dispatcher on one Docker host.
+Caddy terminates HTTPS and proxies public traffic to the frontend. The frontend
+calls the API over the private Docker network, so `VERITYX_API_KEY` is never
+sent to the browser.
+
+### Requirements
+
+- A Linux VPS or server with Docker Engine and the Docker Compose plugin.
+- A domain name with its DNS A record pointing to the server's public IPv4
+  address (and an AAAA record only if IPv6 is correctly configured).
+- Inbound TCP ports 80 and 443 open in the host firewall and cloud firewall.
+- Enough disk space for Docker images, PostgreSQL, and uploaded media.
+
+### Configure secrets and domain
+
+From the repository root, copy `.env.example` to `.env` and replace the
+placeholders:
+
+```bash
+cp .env.example .env
+```
+
+Generate independent URL-safe secrets using Python:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Use the first value for `POSTGRES_PASSWORD` and the second for
+`VERITYX_API_KEY`. Keep the PostgreSQL password URL-safe because the Compose
+configuration places it in a database URL. Set `VERITYX_DOMAIN` to your real
+domain. Never commit `.env`.
+
+### Build and launch
+
+```bash
+docker compose --profile production up --build -d
+docker compose ps
+docker compose logs --tail=100 api frontend caddy worker outbox-dispatcher
+```
+
+The API container runs `alembic upgrade head` before starting FastAPI. Caddy
+will request TLS certificates after the domain resolves to the server and
+ports 80/443 are reachable. Then visit `https://YOUR_DOMAIN` and check
+`https://YOUR_DOMAIN/api/backend/health`.
+
+The API and frontend ports are bound to localhost on the host; only Caddy's
+ports 80/443 are publicly exposed. PostgreSQL and Redis are not published
+publicly. Uploaded media is stored in a Docker volume shared by the API,
+worker, and outbox dispatcher.
+
+### Operations and limitations
+
+```bash
+docker compose logs -f api worker outbox-dispatcher
+docker compose pull caddy
+docker compose up -d
+```
+
+Back up PostgreSQL and the `media_data` volume before upgrades or migrations.
+Do not delete volumes when redeploying. A single-host Compose deployment is a
+practical demo deployment, not high availability: host failure can take down
+the entire application. Configure off-host backups and monitor disk usage.
+Before inviting untrusted users, review authentication, upload limits, API
+rate limits, data retention, privacy notices, and recovery procedures.

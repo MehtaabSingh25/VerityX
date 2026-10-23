@@ -117,12 +117,26 @@ def search_public_web_image(file_path: Path) -> dict[str, Any]:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        # Do not include the request URL because it contains the API key.
+        # The request URL contains the API key; never include it in diagnostics.
+        try:
+            error_payload = json.loads(exc.read().decode("utf-8"))
+            provider_error = error_payload.get("error", {}) if isinstance(error_payload, dict) else {}
+            provider_message = provider_error.get("message") if isinstance(provider_error, dict) else None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            provider_message = None
+
+        detail = str(provider_message).strip().replace(api_key, "[redacted]")[:300] if provider_message else ""
         if exc.code in (401, 403):
-            raise RuntimeError("Cloud Vision rejected the API key or API permissions") from exc
+            suffix = f" Provider detail: {detail}" if detail else ""
+            raise RuntimeError(
+                "Cloud Vision rejected the request. Check that the Vision API is enabled, "
+                "billing is active, and API-key restrictions allow this server." + suffix
+            ) from exc
         if exc.code == 429:
-            raise RuntimeError("Cloud Vision quota exceeded; retry later") from exc
-        raise RuntimeError(f"Cloud Vision request failed with HTTP {exc.code}") from exc
+            suffix = f" Provider detail: {detail}" if detail else ""
+            raise RuntimeError(f"Cloud Vision quota exceeded; retry later.{suffix}") from exc
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"Cloud Vision request failed with HTTP {exc.code}{suffix}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError("Cloud Vision request timed out or could not connect") from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
