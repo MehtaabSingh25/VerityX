@@ -406,9 +406,13 @@ export default function InvestigationWorkspacePage() {
         ),
       );
       setNotice(
-        result.search_type === "keyword_image_search"
-          ? `Keyword search (Openverse) finished: ${result.result_count ?? 0} result(s). This is not a reverse-image search.`
-          : `Visual similarity search (Openverse only) finished: ${result.result_count ?? 0} result(s). Not a whole-web search.`,
+        result.provider === "serpapi_google_lens"
+          ? `Google Lens search finished: ${result.result_count ?? 0} visual match(es). Verify each source independently.`
+          : result.fallback_notice
+            ? `${result.fallback_notice} Found ${result.result_count ?? 0} result(s).`
+            : result.search_type === "keyword_image_search"
+              ? `Keyword search (Openverse) finished: ${result.result_count ?? 0} result(s). This is not a reverse-image search.`
+              : `Visual similarity search (${result.provider === "wikimedia_commons" ? "Wikimedia Commons" : "Openverse"}) finished: ${result.result_count ?? 0} result(s). Not a whole-web search.`,
       );
     } catch (searchError) {
       const message =
@@ -494,7 +498,7 @@ export default function InvestigationWorkspacePage() {
           <div>
             <div className="workspace-eyebrow">INVESTIGATION WORKSPACE</div>
             <h1>AI Detection &amp; Web Search</h1>
-            <p>Upload image or video evidence, run available forensic checks, and search free image search (Openverse) for source leads.</p>
+            <p>Upload image or video evidence, run available forensic checks, and search Google Lens (SerpApi) or Openverse for source leads.</p>
           </div>
           <div className="workspace-heading-actions">
             <span className="workspace-case-id">
@@ -949,8 +953,13 @@ export default function InvestigationWorkspacePage() {
                             {item.webSearchResult.search_type === "keyword_image_search"
                               ? "Keyword image search (not reverse-image search)"
                               : "Visual similarity search (auto-described image)"}{" "}
-                            · Openverse · {item.webSearchResult.result_count ?? 0} results
+                            · {item.webSearchResult.provider === "wikimedia_commons" ? "Wikimedia Commons (fallback)" : "Openverse"} · {item.webSearchResult.result_count ?? 0} results
                           </h4>
+                          {item.webSearchResult.fallback_notice && (
+                            <p role="status" className="forensic-disclaimer">
+                              {item.webSearchResult.fallback_notice}
+                            </p>
+                          )}
                           <p>
                             <strong>Search text:</strong> {item.webSearchResult.query}
                             {item.webSearchResult.query_source === "auto_caption" &&
@@ -998,7 +1007,7 @@ export default function InvestigationWorkspacePage() {
             </section>
           )}
           <div className="workspace-panel-footer">
-            <span>SHA-256 integrity · AI image detection · free image search (Openverse)</span>
+            <span>SHA-256 integrity · AI image detection · Google Lens / Openverse image search</span>
             <span>Automated results require human review</span>
           </div>
         </section>

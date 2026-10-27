@@ -184,3 +184,35 @@ def test_clip_similarity_path_with_real_transformers_tiny_model(monkeypatch):
     sims = ws._clip_similarities(red, [red.copy(), blue])
     assert sims[0] == pytest.approx(1.0, abs=1e-4)
     assert sims[1] < sims[0]
+
+
+def test_openverse_request_uses_browser_like_user_agent(tmp_path, monkeypatch):
+    path, seen = _setup(tmp_path, monkeypatch)
+    original = ws.urllib.request.urlopen
+
+    def inspect_request(request, timeout=None):
+        assert request.get_header("User-agent").startswith("Mozilla/5.0")
+        assert timeout == ws.REQUEST_TIMEOUT_SECONDS
+        return original(request, timeout=timeout)
+
+    # _setup supplies a deterministic mocked response; inspect the actual request.
+    monkeypatch.setattr(ws.urllib.request, "urlopen", inspect_request)
+    ws.search_public_web_image(path, "cat")
+
+
+def test_openverse_retries_transient_network_failure(tmp_path, monkeypatch):
+    path = tmp_path / "q.png"
+    path.write_bytes(_png_bytes(_img()))
+    api = _Resp(b'{"results": []}')
+    calls = {"count": 0}
+
+    def flaky(request, timeout=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise urllib.error.URLError("temporary connection failure")
+        return api
+
+    monkeypatch.setattr(ws.urllib.request, "urlopen", flaky)
+    result = ws.search_public_web_image(path, "cat")
+    assert calls["count"] == 2
+    assert result["results"] == []

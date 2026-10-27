@@ -55,12 +55,39 @@ async function requestJson<T>(
     headers.set("X-Investigation-ID", investigationId);
   }
 
-  const response = await fetch(`/api/backend/api/v1${path}`, {
+  const url = `/api/backend/api/v1${path}`;
+  let response = await fetch(url, {
     ...options,
     headers,
     cache: "no-store",
   });
-  const payload = await response.json().catch(() => null) as { detail?: unknown; message?: unknown } | null;
+  let payload = await response.json().catch(() => null) as { detail?: unknown; message?: unknown } | null;
+
+  // Older investigations may have a token that was lost when the browser session ended.
+  // Recover only on the explicit backend token-rejection response, rotate through the
+  // trusted same-origin proxy, store the new scoped token for this session, and retry once.
+  if (
+    response.status === 403 &&
+    investigationId &&
+    payload?.detail === "Missing or invalid investigation token"
+  ) {
+    const rotation = await fetch(
+      `/api/backend/api/v1/investigations/${encodeURIComponent(investigationId)}/access-token/rotate`,
+      {
+        method: "POST",
+        headers: { "X-Investigation-ID": investigationId },
+        cache: "no-store",
+      },
+    );
+    const rotated = await rotation.json().catch(() => null) as { access_token?: unknown } | null;
+    if (rotation.ok && typeof rotated?.access_token === "string" && typeof window !== "undefined") {
+      window.sessionStorage.setItem(`verityx:investigation-token:${investigationId}`, rotated.access_token);
+      headers.set("X-Investigation-Token", rotated.access_token);
+      response = await fetch(url, { ...options, headers, cache: "no-store" });
+      payload = await response.json().catch(() => null) as { detail?: unknown; message?: unknown } | null;
+    }
+  }
+
   if (!response.ok) {
     const detail = payload?.detail ?? payload?.message;
     const message = typeof detail === "string" ? detail : `Request failed (${response.status})`;
@@ -148,6 +175,7 @@ export function createAiDetectionJob(investigationId: string, mediaAssetId: stri
 
 export type PublicWebImageSearchResponse = {
   provider?: string;
+  fallback_notice?: string | null;
   search_type?: "visual_similarity_search" | "keyword_image_search";
   query?: string;
   query_source?: "user_keywords" | "auto_caption";

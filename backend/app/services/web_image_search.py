@@ -1,4 +1,4 @@
-"""Free image search with no paid or billing-enabled provider.
+﻿"""Free image search with no paid or billing-enabled provider.
 
 No free Google-Lens-style reverse-image API exists (TinEye/Google/Bing need paid
 plans, billing, or ToS-violating scraping), so this module does the honest
@@ -28,15 +28,20 @@ from typing import Any
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 OPENVERSE_ENDPOINT = "https://api.openverse.org/v1/images/"
+SERPAPI_IMAGE_ENDPOINT = "https://serpapi.com/image"
+SERPAPI_SEARCH_ENDPOINT = "https://serpapi.com/search.json"
+SERPAPI_MAX_IMAGE_BYTES = 500 * 1024
+WIKIMEDIA_ENDPOINT = "https://commons.wikimedia.org/w/api.php"
 MAX_IMAGE_BYTES = 7 * 1024 * 1024
 MAX_RESULTS = 10
 CANDIDATE_COUNT = 20
-REQUEST_TIMEOUT_SECONDS = 20
+REQUEST_TIMEOUT_SECONDS = 30
+OPENVERSE_RETRIES = 2
 THUMBNAIL_TIMEOUT_SECONDS = 8
 MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024
 MAX_QUERY_LENGTH = 200
 NEAR_DUPLICATE_BITS = 6
-USER_AGENT = "VerityX/1.0 (image provenance research)"
+USER_AGENT = "Mozilla/5.0 (compatible; VerityX/1.0; image provenance research)"
 DEFAULT_CAPTION_MODEL = "Salesforce/blip-image-captioning-base"  # BSD-3-Clause
 DEFAULT_CLIP_MODEL = "openai/clip-vit-base-patch32"  # MIT
 
@@ -104,24 +109,45 @@ def _dhash(image: Image.Image) -> int:
     return bits
 
 
-def _is_openverse_url(url: Any) -> bool:
+def _allowed_media_url(url: Any) -> bool:
+    """Allow only HTTPS media URLs from the indexes we intentionally query."""
     if not isinstance(url, str):
         return False
     parsed = urllib.parse.urlparse(url)
-    host = parsed.hostname or ""
+    host = (parsed.hostname or "").lower()
+    allowed = (
+        host == "openverse.org" or host.endswith(".openverse.org")
+        or host == "wikimedia.org" or host.endswith(".wikimedia.org")
+        or host == "wikipedia.org" or host.endswith(".wikipedia.org")
+    )
+    return parsed.scheme == "https" and allowed
+
+
+def _is_openverse_url(url: Any) -> bool:
+    """Compatibility helper retained for existing tests and callers."""
+    if not isinstance(url, str):
+        return False
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower()
     return parsed.scheme == "https" and (host == "openverse.org" or host.endswith(".openverse.org"))
 
 
-class _OpenverseOnlyRedirects(urllib.request.HTTPRedirectHandler):
+class _AllowedMediaRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
-        if not _is_openverse_url(newurl):
-            raise urllib.error.URLError("redirect to a non-Openverse host blocked")
+        if not _allowed_media_url(newurl):
+            raise urllib.error.URLError("redirect to a non-approved media host blocked")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class _OpenverseOnlyRedirects(_AllowedMediaRedirects):
+    """Legacy name retained for tests; redirects remain restricted to trusted hosts."""
+
+
 def _fetch_thumbnail(url: str) -> Image.Image | None:
+    if not _allowed_media_url(url):
+        return None
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    opener = urllib.request.build_opener(_OpenverseOnlyRedirects)
+    opener = urllib.request.build_opener(_AllowedMediaRedirects)
     try:
         with opener.open(request, timeout=THUMBNAIL_TIMEOUT_SECONDS) as response:
             data = response.read(MAX_THUMBNAIL_BYTES + 1)
@@ -134,28 +160,193 @@ def _fetch_thumbnail(url: str) -> Image.Image | None:
         return None
 
 
+def _serpapi_upload_bytes(image: Image.Image) -> bytes:
+    """Encode a JPEG under SerpApi Image API's documented 500 KB limit."""
+    for size in (1600, 1280, 1024, 800, 640, 480):
+        resized = image.copy()
+        resized.thumbnail((size, size))
+        for quality in (88, 78, 68, 58, 48):
+            buffer = io.BytesIO()
+            resized.save(buffer, format="JPEG", quality=quality, optimize=True)
+            data = buffer.getvalue()
+            if len(data) <= SERPAPI_MAX_IMAGE_BYTES:
+                return data
+    raise ValueError("Image could not be compressed below SerpApi's 500 KB upload limit")
+
+
+def _serpapi_candidates(image: Image.Image, query: str | None = None) -> list[dict[str, Any]]:
+    """Upload a compressed evidence image and search Google Lens through SerpApi."""
+    api_key = os.getenv("SERPAPI_API_KEY", "").strip()
+    if not api_key:
+        raise SearchNotConfiguredError("SerpApi is not configured; set SERPAPI_API_KEY.")
+    image_bytes = _serpapi_upload_bytes(image)
+    boundary = "----VerityXSerpApiBoundary"
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"evidence.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".encode()
+            + image_bytes
+            + f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"api_key\"\r\n\r\n{api_key}\r\n--{boundary}--\r\n".encode())
+    upload_request = urllib.request.Request(SERPAPI_IMAGE_ENDPOINT, data=body, method="POST", headers={
+        "User-Agent": USER_AGENT, "Content-Type": f"multipart/form-data; boundary={boundary}", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(upload_request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            uploaded = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"SerpApi image upload failed with HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("SerpApi image upload timed out or could not connect") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("SerpApi image upload returned an invalid response") from exc
+    image_id = uploaded.get("image_id") if isinstance(uploaded, dict) else None
+    if not isinstance(image_id, str) or not image_id:
+        detail = uploaded.get("error") if isinstance(uploaded, dict) else None
+        raise RuntimeError(f"SerpApi image upload failed: {str(detail or 'missing image_id')[:200]}")
+
+    params = {"engine": "google_lens", "image_id": image_id, "api_key": api_key, "type": "all", "hl": "en"}
+    if query:
+        params["q"] = query
+    request = urllib.request.Request(f"{SERPAPI_SEARCH_ENDPOINT}?{urllib.parse.urlencode(params)}", headers={
+        "User-Agent": USER_AGENT, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"SerpApi Google Lens search failed with HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("SerpApi Google Lens search timed out or could not connect") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("SerpApi Google Lens returned an invalid response") from exc
+    if not isinstance(payload, dict) or payload.get("error"):
+        detail = payload.get("error") if isinstance(payload, dict) else "invalid response"
+        raise RuntimeError(f"SerpApi Google Lens search failed: {str(detail)[:200]}")
+    raw = payload.get("visual_matches") or payload.get("exact_matches") or []
+    if not isinstance(raw, list):
+        raise RuntimeError("SerpApi Google Lens returned an invalid matches list")
+    candidates = []
+    for item in raw[:CANDIDATE_COUNT]:
+        if not isinstance(item, dict):
+            continue
+        link = item.get("link")
+        if not isinstance(link, str) or urllib.parse.urlparse(link).scheme not in {"https", "http"}:
+            continue
+        candidates.append({
+            "title": item.get("title") if isinstance(item.get("title"), str) else "Google Lens visual match",
+            "foreign_landing_url": link,
+            "url": item.get("image") if isinstance(item.get("image"), str) else None,
+            "thumbnail": item.get("thumbnail") if isinstance(item.get("thumbnail"), str) else None,
+            "creator": item.get("source") if isinstance(item.get("source"), str) else None,
+            "license": "Check source page for rights",
+            "source": item.get("source") if isinstance(item.get("source"), str) else "Google Lens",
+        })
+    return candidates
+
+
+
 def _openverse_candidates(query: str) -> list[dict[str, Any]]:
     params = urllib.parse.urlencode({"q": query, "page_size": CANDIDATE_COUNT})
     request = urllib.request.Request(
         f"{OPENVERSE_ENDPOINT}?{params}",
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code == 429:
-            raise RuntimeError("Openverse anonymous rate limit reached; retry later.") from exc
-        raise RuntimeError(f"Openverse request failed with HTTP {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError("Openverse request timed out or could not connect") from exc
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Openverse returned an invalid response") from exc
+    last_network_error: Exception | None = None
+    payload: Any = None
+    for attempt in range(OPENVERSE_RETRIES):
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                raise RuntimeError("Openverse rate limit reached; retry later.") from exc
+            if exc.code in {500, 502, 503, 504} and attempt + 1 < OPENVERSE_RETRIES:
+                last_network_error = exc
+                continue
+            raise RuntimeError(f"Openverse request failed with HTTP {exc.code}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_network_error = exc
+            if attempt + 1 < OPENVERSE_RETRIES:
+                continue
+            raise RuntimeError(
+                f"Openverse request failed after {OPENVERSE_RETRIES} attempts "
+                f"({type(exc).__name__}); check network access and retry."
+            ) from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Openverse returned an invalid response") from exc
+    else:
+        raise RuntimeError("Openverse request failed after retries") from last_network_error
     results = payload.get("results") if isinstance(payload, dict) else None
     if not isinstance(results, list):
         # Not TypeError: the API layer maps RuntimeError to HTTP 502.
         raise RuntimeError("Openverse returned an invalid response")  # noqa: TRY004
     return [r for r in results if isinstance(r, dict)][:CANDIDATE_COUNT]
+
+
+def _wikimedia_candidates(query: str) -> list[dict[str, Any]]:
+    """Search Wikimedia Commons as a no-key, no-billing fallback provider."""
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": query,
+        "gsrnamespace": 6,
+        "gsrlimit": CANDIDATE_COUNT,
+        "prop": "imageinfo|info",
+        "iiprop": "url|extmetadata",
+        "iiurlwidth": 500,
+        "inprop": "url",
+        "format": "json",
+        "formatversion": 2,
+    })
+    request = urllib.request.Request(
+        f"{WIKIMEDIA_ENDPOINT}?{params}",
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Wikimedia Commons fallback failed with HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError("Wikimedia Commons fallback timed out or could not connect") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Wikimedia Commons returned an invalid response") from exc
+
+    pages = payload.get("query", {}).get("pages", []) if isinstance(payload, dict) else []
+    if not isinstance(pages, list):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        info_list = page.get("imageinfo")
+        info = info_list[0] if isinstance(info_list, list) and info_list else {}
+        if not isinstance(info, dict):
+            continue
+        metadata = info.get("extmetadata") if isinstance(info.get("extmetadata"), dict) else {}
+        def metadata_value(key: str) -> str | None:
+            value = metadata.get(key)
+            if isinstance(value, dict):
+                value = value.get("value")
+            if not isinstance(value, str):
+                return None
+            # API metadata may contain HTML; strip tags before displaying it.
+            import re
+            clean = re.sub(r"<[^>]+>", " ", value)
+            return " ".join(clean.split())[:300] or None
+        page_url = page.get("fullurl")
+        image_url = info.get("url")
+        thumb_url = info.get("thumburl") or image_url
+        if not isinstance(page_url, str) or not page_url.startswith("https://commons.wikimedia.org/"):
+            continue
+        if not _allowed_media_url(image_url) or not _allowed_media_url(thumb_url):
+            continue
+        candidates.append({
+            "title": str(page.get("title") or "Wikimedia Commons image")[:300],
+            "foreign_landing_url": page_url,
+            "url": image_url,
+            "thumbnail": thumb_url,
+            "creator": metadata_value("Artist"),
+            "license": metadata_value("LicenseShortName") or "See source page for licence",
+            "source": "Wikimedia Commons",
+        })
+    return candidates[:CANDIDATE_COUNT]
 
 
 def _text(item: dict[str, Any], key: str) -> str | None:
@@ -180,7 +371,7 @@ def rank_candidates(
             "title": _text(item, "title"),
             "page_url": page_url,
             "image_url": _http_url(item.get("url")),
-            "thumbnail_url": item.get("thumbnail") if _is_openverse_url(item.get("thumbnail")) else None,
+            "thumbnail_url": item.get("thumbnail") if _allowed_media_url(item.get("thumbnail")) else None,
             "creator": _text(item, "creator"),
             "license": _text(item, "license"),
             "source": _text(item, "source"),
@@ -267,23 +458,89 @@ def search_public_web_image(file_path: Path, query: str | None = None) -> dict[s
         search_type, query_source = "keyword_image_search", "user_keywords"
     else:
         search_type, query_source = "visual_similarity_search", "auto_caption"
-        cleaned = _caption_image(image)
 
-    candidates = _openverse_candidates(cleaned)
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        thumbnails = list(pool.map(
-            lambda c: _fetch_thumbnail(c["thumbnail"]) if _is_openverse_url(c.get("thumbnail")) else None,
-            candidates,
-        ))
-    results, method = rank_candidates(image, candidates, thumbnails)
+    provider = "openverse"
+    fallback_note = None
+    if os.getenv("SERPAPI_API_KEY", "").strip():
+        try:
+            candidates = _serpapi_candidates(image, cleaned or None)
+            provider = "serpapi_google_lens"
+        except RuntimeError as serpapi_error:
+            if not cleaned:
+                cleaned = _caption_image(image)
+            try:
+                candidates = _openverse_candidates(cleaned)
+                fallback_note = f"SerpApi Google Lens was unavailable ({serpapi_error}); showing Openverse results instead."
+            except RuntimeError as openverse_error:
+                try:
+                    candidates = _wikimedia_candidates(cleaned)
+                    provider = "wikimedia_commons"
+                    fallback_note = f"SerpApi and Openverse were unavailable; showing Wikimedia Commons results. ({openverse_error})"
+                except RuntimeError as fallback_error:
+                    raise RuntimeError(f"SerpApi failed ({serpapi_error}); Openverse failed ({openverse_error}); Wikimedia fallback failed ({fallback_error}).") from fallback_error
+    else:
+        if not cleaned:
+            cleaned = _caption_image(image)
+        try:
+            candidates = _openverse_candidates(cleaned)
+        except RuntimeError as openverse_error:
+            if "invalid response" in str(openverse_error).lower():
+                raise
+            try:
+                candidates = _wikimedia_candidates(cleaned)
+                provider = "wikimedia_commons"
+                fallback_note = (
+                    f"Openverse was unavailable ({openverse_error}). Results are from Wikimedia Commons, "
+                    "a separate openly licensed image index."
+                )
+            except RuntimeError as fallback_error:
+                raise RuntimeError(
+                    f"Openverse search failed ({openverse_error}); Wikimedia Commons fallback also failed "
+                    f"({fallback_error}). Please retry later."
+                ) from fallback_error
+
+    if provider == "serpapi_google_lens":
+        results = []
+        for candidate in candidates[:MAX_RESULTS]:
+            page_url = _http_url(candidate.get("foreign_landing_url"))
+            if page_url:
+                results.append({
+                    "title": _text(candidate, "title"), "page_url": page_url,
+                    "image_url": _http_url(candidate.get("url")),
+                    "thumbnail_url": _http_url(candidate.get("thumbnail")),
+                    "creator": _text(candidate, "creator"), "license": _text(candidate, "license"),
+                    "source": _text(candidate, "source"), "visual_similarity": None,
+                    "visual_distance_bits": None, "near_duplicate": False,
+                })
+        method = "none"
+        limitations = [
+            "Results are Google Lens visual matches returned through SerpApi; they are leads, not proof of identity, origin, ownership, or publication date.",
+            "The uploaded image is sent to SerpApi for processing. Verify source pages independently and check image-use rights.",
+        ]
+    else:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            thumbnails = list(pool.map(
+                lambda c: _fetch_thumbnail(c["thumbnail"]) if _allowed_media_url(c.get("thumbnail")) else None,
+                candidates,
+            ))
+        results, method = rank_candidates(image, candidates, thumbnails)
+        limitations = _limitations(search_type, method)
+        if provider == "wikimedia_commons":
+            limitations[0] = (
+                "Coverage is limited to openly licensed files indexed by Wikimedia Commons. This is NOT a whole-web "
+                "reverse-image search; social media and many news sites are not indexed."
+            )
+            limitations.append("Openverse was unavailable, so VerityX automatically used Wikimedia Commons as a fallback.")
     return {
         "check": "public_web_image_search",
         "search_type": search_type,
-        "provider": "openverse",
+        "provider": provider,
         "query": cleaned,
         "query_source": query_source,
         "ranking_method": method,
         "results": results,
         "result_count": len(results),
-        "limitations": _limitations(search_type, method),
+        "limitations": limitations if provider == "serpapi_google_lens" else limitations,
+        "fallback_notice": fallback_note,
     }
+
