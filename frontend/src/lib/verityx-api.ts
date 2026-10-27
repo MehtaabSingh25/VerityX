@@ -148,19 +148,36 @@ export function createAiDetectionJob(investigationId: string, mediaAssetId: stri
 
 export type PublicWebImageSearchResponse = {
   provider?: string;
+  search_type?: "visual_similarity_search" | "keyword_image_search";
+  query?: string;
+  query_source?: "user_keywords" | "auto_caption";
+  ranking_method?: "clip_cosine" | "dhash" | "none";
   result_count?: number;
-  pages_with_matching_images?: { url: string; page_title?: string | null; full_matching_image_urls?: string[]; partial_matching_image_urls?: string[] }[];
-  visually_similar_image_urls?: string[];
-  full_matching_image_urls?: string[];
-  partial_matching_image_urls?: string[];
-  web_entities?: { description: string; score?: number | null }[];
+  results?: {
+    title?: string | null;
+    page_url: string;
+    image_url?: string | null;
+    thumbnail_url?: string | null;
+    creator?: string | null;
+    license?: string | null;
+    source?: string | null;
+    visual_similarity?: number | null;
+    visual_distance_bits?: number | null;
+    near_duplicate?: boolean;
+  }[];
   limitations?: string[];
 };
 
-export function searchPublicWebImage(investigationId: string, mediaAssetId: string) {
+export function searchPublicWebImage(investigationId: string, mediaAssetId: string, query?: string) {
+  const keywords = query?.trim();
   return requestJson<PublicWebImageSearchResponse>(
     `/media/${encodeURIComponent(mediaAssetId)}/web-image-search`,
-    { method: "POST" },
+    {
+      method: "POST",
+      ...(keywords
+        ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: keywords }) }
+        : {}),
+    },
     investigationId,
   );
 }

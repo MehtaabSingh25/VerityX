@@ -1,37 +1,46 @@
-# Public-web image search
+# Free image search (Openverse + local models)
 
-VerityX can query Google Cloud Vision's Web Detection feature for indexed pages
-containing a matching image, exact/partial image matches, visually similar
-image URLs, and associated web entities. This is an external provider integration;
-it is not a crawl of the entire internet and results depend on provider indexing.
+No paid, billing-enabled or key-gated service is used or required. Google Cloud
+Vision support was removed.
 
-## Configuration
+## Why this is not Google Lens
 
-1. Enable the Cloud Vision API in a Google Cloud project.
-2. Create an API key restricted to the Cloud Vision API and configure billing/quota.
-3. Set `GOOGLE_CLOUD_VISION_API_KEY` in the API container's environment.
-4. Restart the API container.
+No legitimate free API offers Google-Lens-style whole-web reverse-image search.
+Google Lens, TinEye and Bing need paid plans/billing; Yandex and similar sites
+have no official API and scraping them violates their terms. Free tiers that
+exist (e.g. SerpApi) need a publicly reachable image URL, which would mean
+publishing evidence images, so they are not implemented.
 
-Example `.env` entry (keep the real value private):
+## What VerityX does instead
 
-```dotenv
-GOOGLE_CLOUD_VISION_API_KEY=replace-with-your-restricted-key
-```
+`POST /api/v1/media/{media_asset_id}/web-image-search` (requires
+`X-Investigation-Token`; images only, max 7 MiB):
 
-## API
+| Body | `search_type` | How it works |
+|------|---------------|--------------|
+| none | `visual_similarity_search` | A local BLIP model describes the image; that text is searched on [Openverse](https://openverse.org); result thumbnails are ranked by local CLIP embedding similarity to the upload |
+| `{"query": "keywords"}` | `keyword_image_search` | Openverse is searched with your keywords; the same local ranking is applied. This is a keyword search, **not** reverse-image search |
 
-`POST /api/v1/media/{media_asset_id}/web-image-search`
+Results include `visual_similarity` (CLIP cosine, not a probability),
+`visual_distance_bits` (64-bit dHash distance) and `near_duplicate`
+(distance <= 6). `ranking_method` is `clip_cosine`, or `dhash` if CLIP could not
+run. If the captioning model is unavailable and no keywords are given, the API
+returns 503 asking for keywords; nothing is fabricated.
 
-Supply the `X-Investigation-Token` header for the investigation that owns the
-media. The endpoint accepts stored images only; the image must be at most 7 MiB.
-The response contains `pages_with_matching_images`, `visually_similar_image_urls`,
-`full_matching_image_urls`, `partial_matching_image_urls`, and `web_entities`.
+## Setup and costs
 
-## Evidence limitations and privacy
+- Free. Openverse anonymous access has rate limits (HTTP 429 is surfaced).
+- First use downloads Salesforce/blip-image-captioning-base (BSD-3-Clause) and
+  openai/clip-vit-base-patch32 (MIT) into `HF_HOME` (set in `docker-compose.yml`
+  to a path in the media volume). The API needs outbound access to
+  huggingface.co and api.openverse.org, plus a few GB of disk; first request is slow.
+- Override models with `VERITYX_CAPTION_MODEL` / `VERITYX_CLIP_MODEL`.
 
-- Search results are leads, not proof of authorship, first publication, copyright,
-  or authenticity. Preserve and independently verify any candidate source.
-- A no-match result means only that the provider returned no indexed match.
-- Image bytes are sent to Google Cloud Vision for processing. Do not submit
-  sensitive or restricted media unless your policies permit that transfer.
-- API usage may incur charges and is subject to Google Cloud quotas and terms.
+## Limitations
+
+- Coverage is only openly licensed images indexed by Openverse; it cannot match
+  most of the web, news, or social media. Absence of results proves nothing.
+- Auto-generated search text can be wrong; results are leads, not proof of
+  origin, ownership or date. Verify independently.
+- Only the image text query is sent to Openverse; image bytes stay on your
+  server. Thumbnails are fetched only from `*.openverse.org` over https.

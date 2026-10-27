@@ -41,7 +41,7 @@ services:
       API_KEY: ${VERITYX_API_KEY:?Set VERITYX_API_KEY in .env}
       MEDIA_STORAGE_DIR: /app/data/media
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
-      GOOGLE_CLOUD_VISION_API_KEY: ${GOOGLE_CLOUD_VISION_API_KEY:-}
+      HF_HOME: /app/data/media/.hf_cache
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -81,6 +81,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       MEDIA_STORAGE_DIR: /app/data/media
       MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-52428800}
+      VERITYX_AI_DETECTOR_MODELS: ${VERITYX_AI_DETECTOR_MODELS:-Organika/sdxl-detector,capcheck/ai-human-generated-image-detection}
+      VERITYX_AI_DETECTION_THRESHOLD: ${VERITYX_AI_DETECTION_THRESHOLD:-0.75}
+      HF_HOME: /app/data/media/.hf_cache
     volumes:
       - media_data:/app/data/media
     depends_on:
