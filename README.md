@@ -1,438 +1,351 @@
 # VerityX
 
-**Digital Media Intelligence & Forensics**
+**Digital Media Intelligence & Forensics**  
+*A backend-focused platform for media examination, evidence management, and provenance research.*
 
-VerityX is a digital media forensics platform in development, designed to help users examine images and videos, compare related media, investigate possible media provenance, and document evidence-backed findings.
+VerityX is a full-stack digital media investigation platform built around a modular **FastAPI backend** and an asynchronous analysis pipeline. It lets users create investigations, securely ingest image and video evidence, run integrity and media-analysis jobs, compare visual fingerprints, search for visually related public-web images, and generate structured investigation reports.
 
-This solo project focuses on backend engineering, asynchronous processing, reliable data pipelines, and explainable media analysis.
+The project emphasizes practical backend and systems engineering: durable job orchestration, transactional messaging, scoped access tokens, database-backed audit history, media validation, observability, and containerized deployment.
 
-> **Status:** Early development. Features in the roadmap are planned and should not be considered implemented until they are available and tested.
+> **Important:** VerityX provides investigative signals, not definitive authenticity verdicts. Similarity results, metadata, reverse-image-search matches, and AI-detector scores require human review and corroborating evidence.
 
-## Project Goals
+---
 
-- Securely ingest and validate image and video files.
-- Calculate cryptographic hashes to identify exact file matches.
-- Extract media metadata and video frames.
-- Run computationally expensive analysis through background workers.
-- Compare media using perceptual hashes and, where appropriate, pretrained embeddings.
-- Maintain structured investigation records and analysis history.
-- Visualize possible relationships between media with supporting evidence and uncertainty.
-- Generate reproducible investigation reports.
+## What it does
 
-VerityX is intended to support investigations, not make definitive authenticity claims. Metadata, similarity measurements, and model predictions are signals that require context; none independently proves that media is authentic or manipulated.
+### Investigation and evidence management
 
-## Technology Stack
+- Create and manage investigation workspaces.
+- Upload image and video evidence with server-side validation and configurable upload-size limits.
+- Store evidence files outside publicly served frontend assets.
+- Calculate SHA-256 hashes at ingestion to identify and later verify the integrity of stored files.
+- Maintain evidence inventory and investigation-scoped access.
+- Rotate investigation access tokens; store token digests rather than plaintext tokens.
 
-| Component             | Technology                        | Purpose                                              |
-| --------------------- | --------------------------------- | ---------------------------------------------------- |
-| Frontend              | Next.js, React, TypeScript        | Investigation dashboard and evidence visualization   |
-| Backend API           | Python, FastAPI, Pydantic         | API endpoints and request validation                 |
-| Database              | PostgreSQL, SQLAlchemy, Alembic   | Relational data modeling and schema migrations       |
-| Background processing | Celery, Redis                     | Asynchronous jobs, retries, and task status          |
-| Media processing      | OpenCV, FFmpeg, hashing libraries | Media inspection, frame extraction, and fingerprints |
-| Object storage        | S3-compatible storage             | Original uploads and derived artifacts               |
-| Testing               | Pytest                            | Unit and integration tests                           |
-| Code quality          | Ruff, mypy                        | Linting and static type checking                     |
-| Infrastructure        | Docker Compose                    | Reproducible development environment                 |
-| CI                    | GitHub Actions                    | Automated testing and quality checks                 |
+### Asynchronous media analysis
 
-The stack will be introduced incrementally. This list describes the intended architecture, not a claim that every component is already implemented.
+Analysis is submitted through the API and processed by Celery workers rather than blocking upload or request handling. Supported analysis jobs include:
 
-## Planned Architecture
+| Job | What it does |
+|---|---|
+| `integrity_check` | Recomputes SHA-256 and compares it with the ingestion record. |
+| `metadata_extract` | Extracts basic image properties and a conservative EXIF allowlist. GPS coordinates and arbitrary EXIF fields are intentionally omitted. |
+| `perceptual_hash` | Computes a 64-bit difference hash (dHash) for coarse image similarity. |
+| `video_metadata` | Reads basic video/container properties using OpenCV. |
+| `video_frame_fingerprints` | Samples up to 12 evenly spaced video frames and computes dHash fingerprints. |
+| `ai_image_detection` | Runs the local Smaug AI-image detector against image evidence. |
+
+Job records and lifecycle events are persisted in PostgreSQL. Clients can inspect job status and event history, including queueing, worker start, completion, retry scheduling, and failure.
+
+### Similarity and provenance research
+
+- Compare completed image dHash and sampled-video frame fingerprints within an investigation.
+- Search for visually related public-web images.
+- Use SerpApi Google Lens when `SERPAPI_API_KEY` is configured.
+- Fall back to Openverse and Wikimedia Commons when SerpApi is not configured or its request fails.
+- Generate a structured JSON investigation report from stored evidence, analysis jobs, lifecycle events, and similarity results.
+
+Reverse-image-search results are leads for further research. They do not independently establish image identity, ownership, source, or publication date. The SerpApi workflow sends a compressed evidence image to SerpApi; only submit media you are authorized to share.
+
+### AI-generated image analysis
+
+VerityX runs **Abacus.AI's Smaug-AI-Image-Detector** locally in the Celery worker. The model produces an AI-generation score from 0 to 1. The configured threshold (default `0.5`) determines the displayed classification.
+
+- Model: [`abacusai/Smaug-AI-Image-Detector`](https://huggingface.co/abacusai/Smaug-AI-Image-Detector)
+- Model execution: local worker inference; image bytes are not sent to a hosted inference API for this step.
+- Configuration: `VERITYX_AI_DETECTION_THRESHOLD`
+- Model score: not independently calibrated for VerityX and not proof of image origin.
+
+The model can produce false positives and false negatives, including on new generators, edited photographs, compressed images, or unfamiliar image sources. Treat the output as one signal among several and do not use it alone for consequential decisions. See [`backend/AI_DETECTION.md`](backend/AI_DETECTION.md) for runtime details and limitations.
+
+---
+
+## Architecture
 
 ```text
-Next.js Frontend
-       |
-       v
-FastAPI Application
-       |
-       +------ PostgreSQL
-       |
-       +------ Redis Task Queue
-                    |
-                    v
-              Celery Workers
-                    |
-                    +---- Media validation and hashing
-                    +---- Metadata and frame extraction
-                    +---- Similarity analysis
-                    +---- Findings and report generation
-                    |
-                    v
-              Object Storage
+                   Browser
+                      |
+                      v
+             Next.js / React UI
+                      |
+             Next.js backend proxy
+                      |
+                      v
+                FastAPI API
+                 /       \
+                /         \
+               v           v
+          PostgreSQL      Redis
+       investigations,     |
+       evidence, jobs,     | Celery broker
+       events, outbox      v
+                       Celery worker
+                    media and AI analysis
+                           |
+                           v
+                    Shared media volume
+
+             Outbox dispatcher
+          PostgreSQL outbox -> Redis
 ```
 
-The initial design favors a modular backend and a separate worker process instead of premature microservices.
+### Reliability design
 
-## Repository Structure
+- **PostgreSQL** is the source of truth for investigations, media assets, analysis jobs, job events, evidence audit records, and outbox messages.
+- **Redis** is used as the Celery message broker.
+- **Celery** executes long-running analysis tasks outside API request handling.
+- **Transactional outbox** writes the queued job and its dispatch message in the same database transaction. A separate dispatcher retries publishing when Redis is unavailable. Delivery is at least once, so task handling is designed to tolerate duplicate delivery.
+- **Idempotency keys** allow clients to safely retry job submissions without unintentionally creating duplicate work for the same media asset and analysis type.
+- **Scoped investigation tokens** limit access to investigation resources; service-key-protected operations handle trusted administrative actions.
+- **Structured logs, request IDs, health checks, and Prometheus metrics** support operational diagnosis.
+
+The application is organized as a modular backend with separate API, worker, and outbox-dispatcher processes rather than a collection of independently deployed microservices.
+
+---
+
+## Technology stack
+
+| Layer | Technologies | Responsibility |
+|---|---|---|
+| Frontend | Next.js 16, React 19, TypeScript | Investigation workspace, evidence views, job status, and reports |
+| API | Python 3.12, FastAPI, Pydantic | REST endpoints, validation, access control |
+| Persistence | PostgreSQL 16, SQLAlchemy, Alembic | Relational data and schema migrations |
+| Queue and workers | Redis 7, Celery | Background job execution and retries |
+| Media processing | Pillow, OpenCV, FFmpeg | Image validation, metadata, video inspection, frame sampling |
+| Integrity and similarity | SHA-256, dHash | Exact-file integrity checks and coarse visual similarity |
+| AI analysis | PyTorch (CPU), Transformers, Sentence Transformers, Smaug | Local AI-generated image scoring |
+| Public image search | SerpApi Google Lens, Openverse, Wikimedia Commons | Reverse-image/provenance research |
+| Observability | Structured logging, Prometheus metrics | Request/job telemetry and health monitoring |
+| Infrastructure | Docker, Docker Compose, Caddy | Local stack and optional HTTPS single-host deployment |
+| Testing and CI | Pytest, GitHub Actions | Backend regression tests and automated quality gate |
+
+---
+
+## Repository layout
 
 ```text
 VerityX/
 ├── backend/
 │   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── models/
-│   │   ├── schemas/
-│   │   └── services/
-│   ├── tests/
-│   └── requirements.txt
+│   │   ├── api/              # REST endpoints
+│   │   ├── core/             # Configuration, security, access, observability
+│   │   ├── db/               # SQLAlchemy database setup
+│   │   ├── models/           # Persistence models
+│   │   ├── schemas/          # Request/response schemas
+│   │   ├── services/         # Media, AI, similarity, search, reporting
+│   │   ├── tasks/            # Celery tasks
+│   │   ├── celery_app.py
+│   │   ├── outbox.py
+│   │   └── outbox_dispatcher.py
+│   ├── migrations/           # Alembic migrations
+│   ├── tests/                # Backend test suite
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── requirements-async.txt
 ├── frontend/
-├── docs/
+│   └── src/app/              # Next.js application and investigation views
+├── .github/workflows/        # CI quality gate
+├── Caddyfile                 # Optional production reverse proxy
 ├── docker-compose.yml
 ├── .env.example
-├── .gitignore
 └── README.md
 ```
 
-The structure may evolve as development progresses.
+---
 
-## Getting Started
+## Getting started with Docker Compose
 
 ### Prerequisites
 
 - Git
-- Python 3.12 or another explicitly supported Python version
-- Node.js LTS and npm
-- Docker Desktop with WSL2 on Windows, or Docker Engine on Linux/macOS
+- Docker Desktop with the WSL 2 backend (Windows), or Docker Engine and the Compose plugin (Linux)
+- Internet access for pulling container images and downloading the Smaug model on first inference
+- Sufficient disk space for container images, PostgreSQL data, uploaded media, and the model cache
 
-### 1. Clone the Repository
+### 1. Clone the repository
 
 ```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL>
+git clone https://github.com/MehtaabSingh25/VerityX.git
 cd VerityX
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure environment variables
 
-Create a local `.env` file using `.env.example` as a template when available. Configure a strong development-only database password.
-
-**Never commit `.env`, API keys, passwords, or production secrets.**
-
-### 3. Start Infrastructure
-
-Once the Docker Compose configuration is ready:
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-### 4. Set Up the Backend
-
-```bash
-cd backend
-python -m venv .venv
-```
-
-On Windows PowerShell:
+Copy the example environment file:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+Copy-Item .env.example .env
 ```
 
-On macOS/Linux:
+Set at least these values in `.env`:
 
-```bash
-source .venv/bin/activate
+```dotenv
+POSTGRES_PASSWORD=your-long-url-safe-password
+VERITYX_API_KEY=your-long-random-service-key
+MAX_UPLOAD_SIZE_BYTES=52428800
+VERITYX_AI_DETECTION_THRESHOLD=0.5
+SERPAPI_API_KEY=
 ```
 
-Install dependencies and start the API:
+`SERPAPI_API_KEY` is optional. Without it, the public image-search service uses the available free-index fallback. `.env.example` also contains `VERITYX_DOMAIN` for the optional production profile.
 
-```bash
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+Generate secrets rather than reusing passwords. Keep `.env` private and never commit API keys or production credentials.
 
-When the API scaffold is configured, visit:
+### 3. Build and start the application
 
-- API: `http://127.0.0.1:8000`
-- Interactive API documentation: `http://127.0.0.1:8000/docs`
-- Health endpoint: `http://127.0.0.1:8000/health`
-
-### 5. Set Up the Frontend
-
-In a separate terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Visit `http://localhost:3000`.
-
-These instructions assume the corresponding configuration and application files exist in the current checkout.
-
-## Testing and Code Quality
-
-Planned backend checks include:
-
-```bash
-pytest
-ruff check .
-mypy app
-```
-
-Frontend linting, integration testing, and CI checks will be documented as those workflows are configured.
-
-## Security and Evidence Principles
-
-- Validate file size, content, and actual file format rather than trusting filename extensions.
-- Treat uploaded files and embedded metadata as untrusted input.
-- Keep uploaded media outside publicly served directories.
-- Preserve original-file hashes and distinguish original files from derived artifacts.
-- Record analysis methods and versions where reproducibility matters.
-- Apply least-privilege access controls and protect credentials.
-- Label model predictions, inferred relationships, and uncertainty explicitly.
-- Never present an AI-generated score as definitive proof of authenticity or manipulation.
-
-
-## Asynchronous analysis jobs
-
-The asynchronous analysis pipeline supports three jobs: checking whether a stored file's SHA-256 hash still matches its ingestion record, extracting basic image properties with a conservative EXIF allowlist, and computing a 64-bit difference hash (dHash) for coarse image similarity. PostgreSQL stores job status, results, and append-only lifecycle events; Redis is used as the Celery broker. Image analysis uses Pillow. Video analysis uses OpenCV to inspect basic stream properties and sample a bounded set of frames for dHash fingerprints; it does not require a GPU. Video results depend on codec support in the installed OpenCV build and are not authenticity verdicts.
-
-The metadata extractor intentionally omits GPS coordinates and arbitrary EXIF fields from its returned result. dHash is a similarity fingerprint, not a cryptographic integrity check and not proof that two files are identical or manipulated.
-
-Install the additional worker dependencies from the backend directory:
-
-```bash
-pip install -r requirements-async.txt
-```
-
-Start PostgreSQL and Redis from the repository root:
-
-```bash
-docker compose up -d postgres redis
-```
-
-In one backend terminal, start the API:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-In another backend terminal, start a development worker. On Windows, `--pool=solo` is the practical local-development option; Linux containers are recommended for production workers:
-
-```bash
-celery -A app.celery_app:celery_app worker --loglevel=INFO --pool=solo
-```
-
-Submit an analysis job for a media asset:
-
-```http
-POST /api/v1/media/{media_asset_id}/analysis-jobs
-Content-Type: application/json
-
-{"analysis_type": "integrity_check"}
-```
-
-For image assets, the supported `analysis_type` values also include:
-
-- `metadata_extract` — basic dimensions, format, mode, and an EXIF allowlist.
-- `perceptual_hash` — a 64-bit difference hash for coarse visual similarity.
-
-For video assets, the supported `analysis_type` values also include:
-
-- `video_metadata` — container/stream properties reported by OpenCV, including dimensions, FPS, frame count, and estimated duration.
-- `video_frame_fingerprints` — samples up to 12 evenly spaced frames and computes a dHash for each sampled frame.
-
-Install the async/video dependencies with `python -m pip install -r requirements-async.txt`. OpenCV support depends on the installed build and the video's codec. Frame fingerprints are coarse similarity cues, not proof of authenticity or manipulation.
-
-The API returns a job record with a UUID and initial status. Poll its status using:
-
-```http
-GET /api/v1/analysis-jobs/{job_id}
-```
-
-Possible states are `queued`, `running`, `completed`, and `failed`. Retrieve the recorded lifecycle with `GET /api/v1/analysis-jobs/{job_id}/events`; events include queueing, worker start, completion, retry scheduling, and terminal failure. Apply database changes with `alembic upgrade head` before using this endpoint. The integrity check compares the stored file's computed SHA-256 digest with the digest recorded during ingestion. Image jobs return structured metadata or a dHash result in the job's `result` field. A mismatch is a completed check with `matches: false`, not proof of malicious manipulation.
-
-## Observability and health checks
-
-The API emits one JSON log object per line. HTTP request logs include a request ID, method, matched route template, response status, and duration; analysis-worker logs include the job ID, analysis type, lifecycle event, duration when completed or failed, and exception type. Logs intentionally avoid media contents, request bodies, credentials, and raw exception messages in structured fields. A stack trace may still appear for worker exceptions to support debugging.
-
-Use `GET /health` to check PostgreSQL and Redis connectivity. It returns `200` when both are reachable and `503` when a dependency is unavailable. `GET /metrics` exposes Prometheus-format metrics for API HTTP request counts and durations, submitted analysis jobs, and enqueue failures. The metrics endpoint is intended for a trusted local or monitoring network; restrict access when deploying publicly.
-
-Because the API and Celery worker run as separate processes, `/metrics` describes the API process only. Worker execution outcomes are currently observable through structured worker logs and persisted job/event records; worker-level Prometheus aggregation is a future improvement.
-
-`GET /api/v1/operations/summary` provides database-backed counts of analysis jobs by status and analysis type, plus lifecycle events by event type. It intentionally excludes media content and free-form error messages. Treat this endpoint as operational information and restrict access to trusted operators when deploying beyond a local development environment.
-
-## Roadmap
-
-- [ ] Establish the repository and local development environment
-- [ ] Connect FastAPI to PostgreSQL using SQLAlchemy and Alembic
-- [ ] Define investigation, media asset, and analysis job models
-- [ ] Implement validated media uploads and SHA-256 hashing
-- [ ] Add Redis and Celery background processing
-- [x] Implement initial image metadata extraction and difference hashing
-- [x] Add bounded video frame sampling and frame-level dHash fingerprints
-- [ ] Build the investigation dashboard and evidence visualization
-- [x] Add initial video stream metadata extraction with OpenCV
-- [x] Record analysis-job lifecycle events for basic processing provenance
-- [ ] Add structured reports and expanded analysis provenance
-- [x] Add initial API request metrics, dependency health checks, and structured worker logs
-- [x] Add end-to-end API workflow tests for upload, analysis, events, and reports
-- [ ] Expand worker-level metrics aggregation and deployment automation
-
-## License
-
-A license has not yet been selected. Until one is added, do not assume others have permission to reuse, distribute, or modify this project.
-
-## Investigation similarity search
-
-VerityX can compare completed image `perceptual_hash` jobs with other image fingerprints and with sampled frames from completed `video_frame_fingerprints` jobs. Use `GET /api/v1/investigations/{investigation_id}/similarity`; the optional `max_distance` query parameter controls the maximum dHash Hamming distance (0–64), and `limit` caps returned matches (1–500). Smaller distances indicate closer bit patterns. The API returns the best sampled-frame match for each pair of media assets, along with frame index/timestamp where available. This is a candidate-discovery aid only: scores are not probabilities, sampled frames can miss content, and similarity does not establish authenticity, common origin, or manipulation.
-
-- [x] Add bounded investigation-level image/video fingerprint similarity search
-
-## Investigation reports
-
-Generate an on-demand JSON report for an investigation with `GET /api/v1/investigations/{investigation_id}/report`. Optional query parameters `max_distance` (0–64, default 10) and `similarity_limit` (1–500, default 100) control candidate similarity findings. The report includes an inventory of media assets, analysis-job statuses and results, recorded job lifecycle events, integrity mismatches, and cross-media similarity candidates.
-
-Reports are generated from the current database records and include a generation timestamp and schema version; they are not immutable exports or tamper-proof audit artifacts. Export or preserve a report separately if a fixed snapshot is required. The report excludes GPS coordinates and arbitrary EXIF fields. Similarity matches are candidate leads only, and a SHA-256 mismatch indicates a difference from the ingestion digest rather than proving malicious tampering.
-
-## Containerized backend stack
-
-The backend can be run with Docker Compose alongside PostgreSQL and Redis. Set `POSTGRES_PASSWORD` in a root `.env` file before starting the stack; use a strong local-only value and never commit the file. The API container runs Alembic migrations before starting FastAPI, and the Celery worker starts only after the API health check succeeds. Both containers mount the same private media volume so uploaded files are available to background jobs.
-
-Build and start the complete backend stack from the repository root:
+From the repository root:
 
 ```bash
 docker compose up --build -d
 docker compose ps
-docker compose logs -f api worker
 ```
 
-The API is bound to `127.0.0.1:8000` by default. Check `http://127.0.0.1:8000/health` and `http://127.0.0.1:8000/docs`. PostgreSQL and Redis ports remain bound to localhost for development. This Compose configuration is a reproducible single-host deployment baseline, not a hardened public production deployment; add TLS, authentication/authorization, secret management, backups, and network restrictions before exposing it to untrusted users.
+The default Compose stack starts PostgreSQL, Redis, the FastAPI API, the Celery worker, the outbox dispatcher, and the Next.js frontend. The API container applies Alembic migrations before starting the application.
 
-## End-to-end workflow tests
+Open:
 
-`backend/tests/test_investigation_workflow.py` exercises investigation creation, media upload, analysis-job execution, event retrieval, and report generation against an isolated SQLite database. The tests run the real analysis task body synchronously and replace only the Celery broker handoff, so they do not require local PostgreSQL or Redis services. Run them with `python -m pytest -q` from `backend`; production-like broker and database behavior should still be smoke-tested with Docker Compose separately.
+- Frontend: http://localhost:3000
+- API health: http://localhost:8000/health
+- API documentation: http://localhost:8000/docs
 
+The API and frontend host ports are bound to localhost in the supplied Compose file. PostgreSQL and Redis are also bound to localhost; they are not intended to be exposed publicly.
 
-## API and investigation-scoped access
-
-The service `X-API-Key` is required for investigation creation, token rotation,
-and the operations summary when `VERITYX_API_KEY` is configured. Local
-development can leave `API_KEY` unset, but that disables the service-key gate
-and is suitable only for a trusted local environment. The Docker Compose
-configuration requires `VERITYX_API_KEY` in the repository-root `.env` file.
-Never commit `.env` or expose the service key in a public browser bundle.
-
-Create an investigation with the service key:
-
-```powershell
-$serviceHeaders = @{ "X-API-Key" = "<your-local-api-key>" }
-$created = Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://127.0.0.1:8000/api/v1/investigations" `
-  -Headers $serviceHeaders `
-  -ContentType "application/json" `
-  -Body '{"title":"Evidence review"}'
-$investigationToken = $created.access_token
-$headers = @{ "X-Investigation-Token" = $investigationToken }
-```
-
-Use the returned `X-Investigation-Token` for uploads, analysis jobs, job event
-history, similarity search, and reports for that investigation. The token is
-returned only at creation or rotation; PostgreSQL stores only its SHA-256 digest.
-The service key is an administrative credential, not a user identity system.
-`/health` and `/metrics` remain outside these authentication checks and should
-be restricted at the network or reverse-proxy layer when exposed beyond a
-trusted host.
-
-
-Rotate a token with `POST /api/v1/investigations/{investigation_id}/access-token/rotate`; this invalidates the previous token. Existing investigations created before this migration have no scoped token and require a rotation before scoped endpoints can access them. The service key is a trusted administrative credential; do not expose it to untrusted clients.
-
-
-## Idempotent analysis-job submission
-
-Clients may send an optional `Idempotency-Key` header when creating an analysis
-job. Keys must contain 1-128 ASCII letters, digits, periods, underscores, colons,
-or hyphens. For the same media asset, repeating the same key and analysis type
-returns the existing job instead of submitting duplicate work. Reusing a key for
-a different analysis type returns `409 Conflict`. Keys are scoped to a media asset;
-clients should generate a fresh key for each distinct intended submission.
-Apply the schema update with `alembic upgrade head` before using this feature.
-
-## Worker retry and duplicate-delivery regression tests
-
-`backend/tests/test_worker_reliability.py` covers transient storage failures that schedule a Celery retry, permanent analysis errors that persist a terminal failed state, and duplicate delivery of an already-completed job. Run with `python -m pytest -q` from `backend`. These tests exercise the task body against isolated SQLite persistence; a real Redis/Celery worker smoke test is still needed to validate broker delivery and process-loss behavior.
-
-
-### Transactional outbox for analysis jobs
-
-Analysis-job creation writes the queued job and a durable outbox message in the same PostgreSQL transaction. The API attempts an immediate publish for low latency, while the dedicated `outbox-dispatcher` service retries messages when Redis is unavailable. Outbox delivery is **at least once**, so task handlers must remain safe under duplicate delivery. Failed publishes use bounded exponential backoff, and stale dispatcher claims can be reclaimed after a lease timeout.
-
-The outbox dispatcher is included in the Docker Compose stack. After upgrading, rebuild services with `docker compose up --build -d`.
-
-
-## Full-stack single-host deployment (Docker Compose + HTTPS)
-
-This deployment profile runs the Next.js frontend, FastAPI API, PostgreSQL,
-Redis, Celery worker, and transactional outbox dispatcher on one Docker host.
-Caddy terminates HTTPS and proxies public traffic to the frontend. The frontend
-calls the API over the private Docker network, so `VERITYX_API_KEY` is never
-sent to the browser.
-
-### Requirements
-
-- A Linux VPS or server with Docker Engine and the Docker Compose plugin.
-- A domain name with its DNS A record pointing to the server's public IPv4
-  address (and an AAAA record only if IPv6 is correctly configured).
-- Inbound TCP ports 80 and 443 open in the host firewall and cloud firewall.
-- Enough disk space for Docker images, PostgreSQL, and uploaded media.
-
-### Configure secrets and domain
-
-From the repository root, copy `.env.example` to `.env` and replace the
-placeholders:
+### 4. Useful Docker commands
 
 ```bash
-cp .env.example .env
+# Follow application and worker logs
+docker compose logs -f api worker outbox-dispatcher
+
+# View service status
+docker compose ps
+
+# Rebuild after changing backend dependencies or source
+docker compose up --build -d
+
+# Stop services without deleting persisted volumes
+docker compose down
 ```
 
-Generate independent URL-safe secrets using Python:
+**Do not use `docker compose down -v` unless you intentionally want to delete the PostgreSQL and media volumes.**
+
+---
+
+## API overview
+
+The interactive OpenAPI documentation at `/docs` is the authoritative reference for request schemas and response details. The main API capabilities include:
+
+| Capability | Endpoint |
+|---|---|
+| Health and dependency status | `GET /health` |
+| Create an investigation | `POST /api/v1/investigations` |
+| Upload evidence | `POST /api/v1/investigations/{investigation_id}/media` |
+| List investigation evidence | `GET /api/v1/investigations/{investigation_id}/media` |
+| Submit an analysis job | `POST /api/v1/media/{media_asset_id}/analysis-jobs` |
+| Read analysis job status | `GET /api/v1/analysis-jobs/{job_id}` |
+| Read job lifecycle events | `GET /api/v1/analysis-jobs/{job_id}/events` |
+| Search public web images | `POST /api/v1/media/{media_asset_id}/web-image-search` |
+| Compare visual fingerprints | `GET /api/v1/investigations/{investigation_id}/similarity` |
+| Generate an investigation report | `GET /api/v1/investigations/{investigation_id}/report` |
+| Operational job summary | `GET /api/v1/operations/summary` |
+| Prometheus metrics | `GET /metrics` |
+
+Investigation creation and token rotation use the service API key. Investigation-scoped operations use the `X-Investigation-Token` header returned when an investigation is created or its token is rotated. The frontend's Next.js backend proxy communicates with FastAPI using the configured service credential; the service key is not intended to be exposed to browser code.
+
+For the exact upload fields, supported analysis types, and authentication requirements, use `/docs` and the backend API schemas.
+
+---
+
+## Analysis workflow example
+
+A typical workflow is:
+
+1. Create an investigation from the workspace.
+2. Upload an image or video as evidence.
+3. Submit one or more analysis jobs for the stored media asset.
+4. Poll the job endpoint or inspect its event history while the worker processes it.
+5. Run similarity comparison or public-web image search when relevant.
+6. Review the evidence and analysis history, then retrieve the investigation report.
+
+Analysis jobs are asynchronous. A successful submission means the job was accepted; it does not mean the analysis has completed. Job states include `queued`, `running`, `completed`, and `failed`.
+
+For a detailed example, submit a job with the `analysis_type` field, for example:
+
+```json
+{
+  "analysis_type": "integrity_check"
+}
+```
+
+An optional `Idempotency-Key` header can be used when submitting jobs. Repeating the same key and analysis type for the same media asset returns the existing job instead of creating duplicate work. Reusing a key for a different analysis type returns a conflict.
+
+---
+
+## Testing
+
+The backend test suite is located in `backend/tests`. Run it from the backend directory:
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+cd backend
+python -m pip install -r requirements.txt -r requirements-async.txt
+python -m pytest -q
 ```
 
-Use the first value for `POSTGRES_PASSWORD` and the second for
-`VERITYX_API_KEY`. Keep the PostgreSQL password URL-safe because the Compose
-configuration places it in a database URL. Set `VERITYX_DOMAIN` to your real
-domain. Never commit `.env`.
+The repository includes tests covering health checks, media validation, security, investigation workflows, AI detection behavior, analysis tasks and events, worker reliability, transactional outbox behavior, evidence auditing, reports, similarity, video analysis, web-image search, and observability.
 
-### Build and launch
+A GitHub Actions workflow is defined in `.github/workflows/quality-gate.yml`. Run the checks in the workflow when preparing changes for merge. A passing unit/integration suite does not replace a real Docker-based smoke test of PostgreSQL, Redis, Celery message delivery, and worker process recovery.
+
+---
+
+## Configuration reference
+
+| Variable | Purpose | Default / requirement |
+|---|---|---|
+| `POSTGRES_PASSWORD` | PostgreSQL password used by Compose | Required |
+| `VERITYX_API_KEY` | Trusted service/admin API credential | Required |
+| `MAX_UPLOAD_SIZE_BYTES` | Maximum accepted upload size | `52428800` (50 MiB) |
+| `VERITYX_AI_DETECTION_THRESHOLD` | Smaug AI-generation classification threshold | `0.5` |
+| `SERPAPI_API_KEY` | Enables Google Lens via SerpApi | Optional |
+| `VERITYX_DOMAIN` | Domain for optional Caddy production profile | Used with production profile |
+| `DATABASE_URL` | SQLAlchemy database connection | Set by Compose services |
+| `REDIS_URL` | Redis connection / Celery broker | Set by Compose services |
+| `MEDIA_STORAGE_DIR` | Persistent media storage directory | `/app/data/media` in Compose |
+| `HF_HOME` | Hugging Face model cache | `/app/data/media/.hf_cache` in Compose |
+
+---
+
+## Optional HTTPS deployment
+
+The Compose file includes a `production` profile with Caddy as a reverse proxy. It is intended for a Linux server with a domain configured to point to the host and inbound TCP ports 80 and 443 open.
+
+Set `VERITYX_DOMAIN` in `.env`, then run:
 
 ```bash
 docker compose --profile production up --build -d
-docker compose ps
-docker compose logs --tail=100 api frontend caddy worker outbox-dispatcher
 ```
 
-The API container runs `alembic upgrade head` before starting FastAPI. Caddy
-will request TLS certificates after the domain resolves to the server and
-ports 80/443 are reachable. Then visit `https://YOUR_DOMAIN` and check
-`https://YOUR_DOMAIN/api/backend/health`.
+Caddy handles HTTPS certificates and proxies public requests to the frontend. The API, frontend, PostgreSQL, and Redis are not directly exposed on public interfaces by the default port bindings. This is a **single-host deployment**, not a high-availability architecture. Configure off-host backups, monitor disk usage, and review authentication, rate limiting, retention, and privacy requirements before accepting untrusted users.
 
-The API and frontend ports are bound to localhost on the host; only Caddy's
-ports 80/443 are publicly exposed. PostgreSQL and Redis are not published
-publicly. Uploaded media is stored in a Docker volume shared by the API,
-worker, and outbox dispatcher.
+---
 
-### Operations and limitations
+## Security, privacy, and forensic limitations
 
-```bash
-docker compose logs -f api worker outbox-dispatcher
-docker compose pull caddy
-docker compose up -d
-```
+- Uploaded files are untrusted input; validate actual content and enforce size limits.
+- Original media is stored in the persistent media volume and should be protected with appropriate host and volume access controls.
+- Investigation tokens are scoped to investigation access; the database stores their SHA-256 digests.
+- Keep service keys and third-party API credentials server-side.
+- The SerpApi Google Lens path sends a compressed copy of the submitted image to SerpApi. Review its terms and your authorization to share the evidence before enabling it.
+- Free image-search fallbacks cover openly indexed sources and are not equivalent to a whole-web search.
+- dHash measures coarse visual similarity; it is not a cryptographic integrity check.
+- Sampled video frames may miss content between samples, and video processing depends on codec support.
+- AI-detection scores can be wrong and are not independently calibrated for VerityX.
+- Similarity, metadata, reverse-image matches, and model predictions do not independently prove authenticity, manipulation, ownership, identity, or provenance.
 
-Back up PostgreSQL and the `media_data` volume before upgrades or migrations.
-Do not delete volumes when redeploying. A single-host Compose deployment is a
-practical demo deployment, not high availability: host failure can take down
-the entire application. Configure off-host backups and monitor disk usage.
-Before inviting untrusted users, review authentication, upload limits, API
-rate limits, data retention, privacy notices, and recovery procedures.
+Use VerityX as an investigative aid and retain human review and corroborating evidence in the decision process.
+
+---
+
+## Project focus
+
+VerityX is designed to demonstrate backend and systems engineering through a practical media-investigation workflow: API design, relational data modeling, secure file handling, background processing, durable job dispatch, idempotency, auditability, observability, and containerized operations.
+
+The emphasis is on building a dependable evidence-processing system—not claiming that any single detector or similarity algorithm can determine the truth about a piece of media.

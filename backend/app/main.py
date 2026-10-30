@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -27,6 +28,14 @@ app = FastAPI(
     version="0.2.0",
 )
 install_security(app)
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-API-Key", "X-Investigation-Token", "X-Investigation-ID"],
+    )
 # Investigation creation/token rotation and operations require the service key.
 # Resource endpoints use a narrower per-investigation token instead.
 app.include_router(media_router)

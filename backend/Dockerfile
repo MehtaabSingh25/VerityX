@@ -17,6 +17,7 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt -r requirements-async.txt
 
 COPY app ./app
+COPY run_render.py ./run_render.py
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 

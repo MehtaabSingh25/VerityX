@@ -148,13 +148,33 @@ export function deleteInvestigationMedia(investigationId: string, mediaAssetId: 
   );
 }
 
-export function uploadMedia(investigationId: string, file: File) {
+export async function uploadMedia(investigationId: string, file: File) {
   const body = new FormData();
   body.append("file", file);
-  return requestJson<MediaResponse>(`/investigations/${encodeURIComponent(investigationId)}/media`, {
-    method: "POST",
-    body,
-  }, investigationId);
+
+  // Vercel Functions impose a request-body limit. When configured, send large
+  // evidence uploads directly to the Render API; all other API traffic remains
+  // behind the same-origin server-side proxy.
+  const directApiUrl = process.env.NEXT_PUBLIC_VERITYX_API_URL?.replace(/\/+$/, "");
+  if (!directApiUrl) {
+    return requestJson<MediaResponse>(`/investigations/${encodeURIComponent(investigationId)}/media`, {
+      method: "POST",
+      body,
+    }, investigationId);
+  }
+
+  const token = investigationToken(investigationId);
+  if (!token) throw new Error("Investigation access token is missing. Reopen the investigation and try again.");
+  const response = await fetch(
+    `${directApiUrl}/api/v1/investigations/${encodeURIComponent(investigationId)}/media`,
+    { method: "POST", headers: { "X-Investigation-Token": token }, body, cache: "no-store" },
+  );
+  const payload = await response.json().catch(() => null) as MediaResponse | { detail?: unknown } | null;
+  if (!response.ok) {
+    const detail = payload && "detail" in payload ? payload.detail : null;
+    throw new Error(typeof detail === "string" ? detail : `Upload failed (${response.status})`);
+  }
+  return payload as MediaResponse;
 }
 
 export function createIntegrityJob(investigationId: string, mediaAssetId: string) {

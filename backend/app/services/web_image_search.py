@@ -94,7 +94,11 @@ def _clip_similarities(image: Image.Image, candidates: list[Image.Image]) -> lis
     with torch.no_grad():
         inputs = processor(images=[image, *candidates], return_tensors="pt")
         features = model.get_image_features(**inputs)
-        features = features / features.norm(dim=-1, keepdim=True)
+        # Transformers 5.x returns BaseModelOutputWithPooling.
+        # Extract the projected image embeddings.
+        if hasattr(features, "pooler_output"):
+            features = features.pooler_output
+        features = features / features.norm(dim=-1, keepdim=True).clamp(min=1e-12)
     return [float(v) for v in (features[1:] @ features[0]).tolist()]
 
 
